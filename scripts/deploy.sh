@@ -6,7 +6,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
 profile="${CF_PROFILE:-default}"
-url="${SPRAY_PRAY_URL:-https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev}"
+url="${SPRAY_PRAY_URL:-https://thruput-spray-pray.sdf-ecosystem.workers.dev}"
 
 output="$(npx cf deploy --profile "$profile" 2>&1 | tee /dev/stderr)"
 expected="$(printf '%s\n' "$output" | sed -n 's/.*Current Version ID: \([0-9a-f-]*\).*/\1/p' | tail -1)"

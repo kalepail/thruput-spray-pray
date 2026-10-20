@@ -3,7 +3,7 @@
 Hold, drag, and send a little chaos through Thruput, hosted on Cloudflare Workers and
 Durable Objects with no container.
 
-- URL: https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev
+- URL: https://thruput-spray-pray.sdf-ecosystem.workers.dev
 - Account: Ecosystem - Stellar (`cf` profile `default`)
 - Source: upstream `groundhog-experiments/spray-pray` plus all the throughput work
   from the former container deployment (merged from its patch workspace, `c7b836e`),
@@ -127,10 +127,10 @@ The lanes fund the four wallets from the faucet on their next start.
 ## Verify
 
 ```sh
-curl -s https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev/api/state
-APP_URL=https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev \
+curl -s https://thruput-spray-pray.sdf-ecosystem.workers.dev/api/state
+APP_URL=https://thruput-spray-pray.sdf-ecosystem.workers.dev \
   LOAD_SECONDS=30 LOAD_BATCH=1000 LOAD_CONCURRENCY=16 npm run test:load
-APP_URL=https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev \
+APP_URL=https://thruput-spray-pray.sdf-ecosystem.workers.dev \
   CHROMIUM_PATH="<Chromium executable>" npm run test:browser
 ```
 

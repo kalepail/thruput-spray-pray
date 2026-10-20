@@ -3,7 +3,7 @@ import * as entrypoint from "./worker/index.ts" with { type: "cf-worker" };
 
 export default defineConfig({
   worker: {
-    name: "thruput-spray-pray-worker",
+    name: "thruput-spray-pray",
     compatibilityDate: "2026-10-06",
     entrypoint,
     observability: { enabled: true },
@@ -18,21 +18,20 @@ export default defineConfig({
       SprayPray: exports.durableObject({ storage: "sqlite" }),
       SprayLane: exports.durableObject({ storage: "sqlite" }),
       Placement: exports.durableObject({ storage: "sqlite" }),
-      RpcLane: exports.durableObject({ state: "deleted" }),
     },
     env: {
       ASSETS: bindings.assets(),
       VERSION: bindings.versionMetadata(),
       SPRAY_PRAY: bindings.durableObject({
-        worker: "thruput-spray-pray-worker",
+        worker: "thruput-spray-pray",
         exportName: "SprayPray",
       }),
       SPRAY_LANE: bindings.durableObject({
-        worker: "thruput-spray-pray-worker",
+        worker: "thruput-spray-pray",
         exportName: "SprayLane",
       }),
       PLACEMENT: bindings.durableObject({
-        worker: "thruput-spray-pray-worker",
+        worker: "thruput-spray-pray",
         exportName: "Placement",
       }),
       THRUPUT_NETWORK: bindings.text("devnet"),
