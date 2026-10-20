@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Engine, type EngineLimits } from "../server/engine.js";
+import {
+  Engine,
+  engineLimits,
+  isNetworkFailure,
+  type EngineLimits,
+} from "../server/engine.js";
 import type { Chain, Operation } from "../server/chain.js";
 
 function fixture(
@@ -130,7 +135,7 @@ test("lost submit response is polled by original hash, never resubmitted", async
   assert.equal(new Set(sent).size, sent.length);
 });
 
-test("opt-in resend repeats identical bytes and ignores duplicate rejection", async (t) => {
+test("opt-in resend repeats identical bytes after a lost connection", async (t) => {
   const sent: string[] = [];
   const failedOnce = new Set<string>();
   const engine = fixture(
@@ -140,10 +145,10 @@ test("opt-in resend repeats identical bytes and ignores duplicate rejection", as
         const key = ops[0]!.hash;
         if (!failedOnce.has(key)) {
           failedOnce.add(key);
-          throw new Error("fetch failed");
+          throw new TypeError("fetch failed");
         }
-        // The first copy was admitted; the gateway rejects the duplicate.
-        return ops.map(() => "rejected");
+        // Devnet answers a duplicate of an admitted transfer with the same hash.
+        return ops.map(() => "accepted");
       },
     },
     { submitRetries: 1 },
@@ -155,6 +160,7 @@ test("opt-in resend repeats identical bytes and ignores duplicate rejection", as
   engine.stop("a");
   await waitFor(() => engine.snapshot().phase === "ready");
   assert.equal(engine.snapshot().succeeded, 8);
+  assert.equal(engine.snapshot().accepted, 8);
   assert.equal(engine.snapshot().failed, 0);
   assert.equal(sent.length, 16);
   assert.equal(new Set(sent).size, 8);
@@ -189,6 +195,98 @@ test("probe polling checks one transfer per batch, then the rest of its batch", 
   assert.deepEqual(engine.snapshot().recentBlocks, [
     { height: "10", succeeded: 8 },
   ]);
+});
+
+test("engine limits reject values that would stall or unbound the engine", () => {
+  assert.equal(engineLimits({}).outstanding, 8192);
+  assert.equal(engineLimits({ SPRAY_OUTSTANDING: " " }).outstanding, 8192);
+  for (const [name, value] of [
+    ["SPRAY_POLL_CONCURRENCY", "0"],
+    ["SPRAY_POLL_BATCH", "0"],
+    ["SPRAY_OUTSTANDING", "1.5"],
+    ["SPRAY_SUBMIT_RETRIES", "-1"],
+    ["SPRAY_FIRST_POLL_RATIO", "9"],
+  ] as const)
+    assert.throws(() => engineLimits({ [name]: value }), new RegExp(name));
+});
+
+test("only network failures are resent; a rejection after a resend fails", async (t) => {
+  assert.equal(isNetworkFailure(new TypeError("fetch failed")), true);
+  assert.equal(
+    isNetworkFailure(new DOMException("slow", "TimeoutError")),
+    true,
+  );
+  assert.equal(isNetworkFailure(new Error("RPC HTTP 503")), false);
+  const failedOnce = new Set<string>();
+  const engine = fixture(
+    {
+      async submit(ops) {
+        const key = ops[0]!.hash;
+        if (!failedOnce.has(key)) {
+          failedOnce.add(key);
+          throw new TypeError("fetch failed");
+        }
+        return ops.map(() => "rejected");
+      },
+    },
+    { submitRetries: 1 },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().attempted >= 8);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  const { attempted, failed, unresolved } = engine.snapshot();
+  assert.equal(failed, attempted);
+  assert.equal(unresolved, 0);
+});
+
+test("HTTP errors are not resent", async (t) => {
+  let calls = 0;
+  const engine = fixture(
+    {
+      async submit() {
+        calls++;
+        throw new Error("RPC HTTP 503");
+      },
+    },
+    { submitRetries: 2 },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().attempted === 8);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  assert.equal(calls, 2);
+});
+
+test("recent blocks keep the latest five heights in numeric order", async (t) => {
+  let height = 0;
+  const engine = fixture({
+    async poll(ops) {
+      return ops.map(() => ({
+        state: "succeeded" as const,
+        height: String(98 + (height++ % 20)),
+      }));
+    },
+  });
+  t.after(() => engine.close());
+  await ready(engine);
+  const spray = () => engine.spray("a", { x: 0, y: 0 });
+  spray();
+  const heartbeat = setInterval(spray, 50);
+  try {
+    await waitFor(() => engine.snapshot().succeeded >= 40, 5000);
+  } finally {
+    clearInterval(heartbeat);
+  }
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  const heights = engine.snapshot().recentBlocks.map((block) => block.height);
+  assert.equal(heights.length, 5);
+  assert.deepEqual(heights, ["113", "114", "115", "116", "117"]);
 });
 
 test("receipt deadline is unresolved, lease expiration stops generation", async (t) => {

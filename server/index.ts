@@ -40,11 +40,18 @@ const mime: Record<string, string> = {
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
 };
-// CPU and event-loop load since the previous state request, for capacity diagnosis.
+// CPU and event-loop load over the last two seconds, sampled on a fixed timer so
+// concurrent readers of /api/state do not reset each other's interval.
+let runtimeSample = {
+  cores: cpus().length,
+  cpuPercent: 0,
+  eventLoopUtilization: 0,
+  intervalMs: 0,
+};
 let lastCpu = process.cpuUsage();
 let lastLoop = performance.eventLoopUtilization();
 let lastAt = performance.now();
-function runtime() {
+setInterval(() => {
   const now = performance.now();
   const cpu = process.cpuUsage(lastCpu);
   const loop = performance.eventLoopUtilization(lastLoop);
@@ -52,13 +59,18 @@ function runtime() {
   lastCpu = process.cpuUsage();
   lastLoop = performance.eventLoopUtilization();
   lastAt = now;
-  return {
+  runtimeSample = {
     cores: cpus().length,
     cpuPercent: Math.round(((cpu.user + cpu.system) / 1000 / wallMs) * 100),
     eventLoopUtilization: Math.round(loop.utilization * 100) / 100,
     intervalMs: Math.round(wallMs),
   };
-}
+}, 2000).unref();
+// A host may stamp the image with BUILD_INFO; report it so deploys can be verified.
+const build = await readFile("BUILD_INFO", "utf8").then(
+  (text) => text.trim(),
+  () => null,
+);
 const server = createServer(async (req, res) => {
   if (req.url === "/api/state" || req.url === "/api/export") {
     res.setHeader("Content-Type", "application/json");
@@ -67,7 +79,8 @@ const server = createServer(async (req, res) => {
       JSON.stringify({
         ...engine.snapshot(),
         exportedAt: new Date().toISOString(),
-        runtime: runtime(),
+        runtime: runtimeSample,
+        build,
         measurement:
           "Successful committed receipts observed by this Node process; experiment throughput, not global network TPS",
       }),

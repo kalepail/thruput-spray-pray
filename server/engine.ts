@@ -22,22 +22,35 @@ export interface EngineLimits {
   probeIntervalMs: number;
 }
 
+/** A request that never produced an HTTP response: fetch failure or timeout. */
+export function isNetworkFailure(error: unknown): boolean {
+  return (
+    (error instanceof TypeError && error.message === "fetch failed") ||
+    (error instanceof DOMException &&
+      (error.name === "TimeoutError" || error.name === "AbortError"))
+  );
+}
+
 export function engineLimits(env: NodeJS.ProcessEnv = {}): EngineLimits {
-  const number = (name: string, fallback: number) => {
-    const value = Number(env[name] ?? fallback);
-    if (!Number.isFinite(value) || value < 0)
-      throw new Error(`${name} must be a non-negative number`);
+  const number = (name: string, fallback: number, minimum = 0) => {
+    const raw = env[name]?.trim();
+    const value = raw ? Number(raw) : fallback;
+    if (!Number.isInteger(value) || value < minimum)
+      throw new Error(`${name} must be an integer of at least ${minimum}`);
     return value;
   };
+  const ratio = Number(env.SPRAY_FIRST_POLL_RATIO?.trim() || 0);
+  if (!Number.isFinite(ratio) || ratio < 0 || ratio > 2)
+    throw new Error("SPRAY_FIRST_POLL_RATIO must be between 0 and 2");
   return {
-    outstanding: number("SPRAY_OUTSTANDING", 8192),
+    outstanding: number("SPRAY_OUTSTANDING", 8192, 1),
     receiptTimeoutMs: 60_000,
     leaseMs: 1500,
-    pollConcurrency: number("SPRAY_POLL_CONCURRENCY", 4),
-    pollBatch: number("SPRAY_POLL_BATCH", 256),
+    pollConcurrency: number("SPRAY_POLL_CONCURRENCY", 4, 1),
+    pollBatch: number("SPRAY_POLL_BATCH", 256, 1),
     firstPollMs: number("SPRAY_FIRST_POLL_MS", 300),
-    firstPollRatio: number("SPRAY_FIRST_POLL_RATIO", 0),
-    pollIntervalMs: number("SPRAY_POLL_INTERVAL_MS", 500),
+    firstPollRatio: ratio,
+    pollIntervalMs: number("SPRAY_POLL_INTERVAL_MS", 500, 1),
     submitRetries: number("SPRAY_SUBMIT_RETRIES", 0),
     probeIntervalMs: number("SPRAY_PROBE_INTERVAL_MS", 0),
   };
@@ -292,16 +305,19 @@ export class Engine extends EventEmitter {
       });
       try {
         let outcomes: Awaited<ReturnType<Chain["submit"]>> | undefined;
-        let resent = false;
         for (let attempt = 0; !outcomes; attempt++) {
           try {
             outcomes = await this.chain.submit(operations);
           } catch (error) {
-            // A lost response can hide admission. Resending the identical signed
-            // bytes is idempotent; it never replaces a transfer with a new one.
-            if (attempt >= this.limits.submitRetries) throw error;
+            // A lost connection can hide admission. Resending the identical signed
+            // bytes never replaces a transfer, and the gateway answers a duplicate
+            // with the same hash. HTTP status and parse errors are not resent.
+            if (
+              attempt >= this.limits.submitRetries ||
+              !isNetworkFailure(error)
+            )
+              throw error;
             this.recordError(error);
-            resent = true;
             await new Promise((resolve) =>
               setTimeout(resolve, 250 * (attempt + 1)),
             );
@@ -311,7 +327,7 @@ export class Engine extends EventEmitter {
           const hash = operations[i]!.hash;
           if (outcomes[i] === "accepted") this.counts.accepted++;
           // After a resend, a rejection may be the duplicate of an admitted copy.
-          else if (outcomes[i] === "rejected" && !resent) {
+          else if (outcomes[i] === "rejected") {
             this.settle(hash, "failed");
             this.recordError("RPC rejected a transfer before admission");
           } else
@@ -421,7 +437,8 @@ export class Engine extends EventEmitter {
       // The probe landed, so its batch has very likely landed too: poll it now.
       for (const member of pending.group.hashes) {
         const item = this.pending.get(member);
-        if (item?.ready) item.nextPoll = 0;
+        // Skip members whose lookup is already in flight.
+        if (item?.ready && item.nextPoll !== Infinity) item.nextPoll = 0;
       }
     }
     if (outcome === "succeeded") {

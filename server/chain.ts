@@ -105,8 +105,11 @@ export function thruputChain(
       const start = sequence;
       sequence += BigInt(count);
       const request = { start, count, walletCount, tip, nonceBase };
-      const operations = await (pool?.prepare(request) ??
-        prepareInline(request));
+      // A pool failure re-signs the same range inline: the request fixes every
+      // nonce and expiry, so the result is the same transfers, never new ones.
+      const operations = pool
+        ? await pool.prepare(request).catch(() => prepareInline(request))
+        : await prepareInline(request);
       await setImmediate();
       return operations;
     },

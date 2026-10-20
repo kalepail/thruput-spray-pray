@@ -5,73 +5,118 @@ import type { Operation, PrepareRequest } from "./prepare.js";
 interface Job {
   resolve: (operations: Operation[]) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+interface Entry {
+  worker: Worker;
+  jobs: Map<number, Job>;
 }
 
-/** Spreads Ed25519 signing across threads so one core does not cap submission. */
-export function createPreparePool(size: number, env: NodeJS.ProcessEnv) {
+/**
+ * Spreads Ed25519 signing across threads so one core does not cap submission.
+ * A failed or exited worker is dropped and rejects only its own jobs; the chain
+ * then signs that range on the main thread.
+ */
+export function createPreparePool(
+  size: number,
+  env: NodeJS.ProcessEnv,
+  { jobTimeoutMs = 30_000, url }: { jobTimeoutMs?: number; url?: URL } = {},
+) {
   // tsx runs the .ts source in development; production runs compiled .js.
   const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-  const url = new URL(`./prepare-worker.${extension}`, import.meta.url);
-  const workers: { worker: Worker; busy: number }[] = [];
-  const jobs = new Map<number, Job>();
+  const workerUrl =
+    url ?? new URL(`./prepare-worker.${extension}`, import.meta.url);
+  let workers: Entry[] = [];
   let nextId = 0;
   let starting: Promise<void> | undefined;
 
-  function fail(error: Error) {
-    for (const job of jobs.values()) job.reject(error);
-    jobs.clear();
+  function retire(entry: Entry, error: Error) {
+    workers = workers.filter((candidate) => candidate !== entry);
+    for (const job of entry.jobs.values()) {
+      clearTimeout(job.timer);
+      job.reject(error);
+    }
+    entry.jobs.clear();
+    void entry.worker.terminate();
+  }
+
+  async function startOne(): Promise<Entry> {
+    const worker = new Worker(workerUrl, { workerData: { ...env } });
+    const entry: Entry = { worker, jobs: new Map() };
+    const [message] = await Promise.race([
+      once(worker, "message"),
+      once(worker, "error").then(([error]) => Promise.reject(error)),
+      once(worker, "exit").then(() =>
+        Promise.reject(new Error("Preparation worker exited during startup")),
+      ),
+    ]);
+    if (!(message as { ready?: boolean }).ready) {
+      void worker.terminate();
+      throw new Error("Preparation worker did not start");
+    }
+    worker.on(
+      "message",
+      (reply: { id?: number; operations?: Operation[]; error?: string }) => {
+        if (reply.id === undefined) return;
+        const job = entry.jobs.get(reply.id);
+        if (!job) return;
+        entry.jobs.delete(reply.id);
+        clearTimeout(job.timer);
+        if (reply.error) job.reject(new Error(reply.error));
+        else job.resolve(reply.operations!);
+      },
+    );
+    worker.on("error", (error: Error) => retire(entry, error));
+    worker.on("exit", (code) =>
+      retire(entry, new Error(`Preparation worker exited (${code})`)),
+    );
+    worker.unref();
+    return entry;
   }
 
   async function start() {
-    for (let i = 0; i < size; i++) {
-      const worker = new Worker(url, { workerData: { ...env } });
-      const entry = { worker, busy: 0 };
-      worker.on(
-        "message",
-        (message: {
-          id?: number;
-          operations?: Operation[];
-          error?: string;
-        }) => {
-          if (message.id === undefined) return;
-          const job = jobs.get(message.id);
-          if (!job) return;
-          jobs.delete(message.id);
-          entry.busy--;
-          if (message.error) job.reject(new Error(message.error));
-          else job.resolve(message.operations!);
-        },
-      );
-      worker.on("error", (error: Error) => fail(error));
-      worker.unref();
-      const [ready] = await Promise.race([
-        once(worker, "message"),
-        once(worker, "error").then(([error]) => Promise.reject(error)),
-      ]);
-      if (!(ready as { ready?: boolean }).ready)
-        throw new Error("Preparation worker did not start");
-      workers.push(entry);
+    const started = await Promise.allSettled(
+      Array.from({ length: size }, startOne),
+    );
+    workers = started.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (workers.length === 0) {
+      const failure = started.find((result) => result.status === "rejected");
+      throw failure?.reason instanceof Error
+        ? failure.reason
+        : new Error("No preparation worker started");
     }
   }
 
   return {
     size,
+    get live() {
+      return workers.length;
+    },
     async prepare(request: PrepareRequest): Promise<Operation[]> {
       await (starting ??= start().catch((error: unknown) => {
         starting = undefined;
-        for (const { worker } of workers.splice(0)) void worker.terminate();
         throw error;
       }));
-      const entry = workers.reduce((a, b) => (b.busy < a.busy ? b : a));
+      if (workers.length === 0) throw new Error("No preparation workers left");
+      const entry = workers.reduce((a, b) =>
+        b.jobs.size < a.jobs.size ? b : a,
+      );
       const id = nextId++;
-      entry.busy++;
       return new Promise((resolve, reject) => {
-        jobs.set(id, { resolve, reject });
+        const timer = setTimeout(() => {
+          entry.jobs.delete(id);
+          reject(new Error("Preparation worker timed out"));
+        }, jobTimeoutMs);
+        entry.jobs.set(id, { resolve, reject, timer });
         entry.worker.postMessage({ id, request });
       });
     },
     async close() {
-      await Promise.all(workers.map(({ worker }) => worker.terminate()));
+      const closing = workers;
+      workers = [];
+      await Promise.all(closing.map(({ worker }) => worker.terminate()));
     },
   };
 }
