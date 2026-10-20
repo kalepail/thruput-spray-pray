@@ -13,7 +13,7 @@ import {
   gasAmount,
   type Invocation,
 } from "@thruputchain/protocol";
-import { demoSigner } from "./signer.js";
+import type { Signer } from "@thruputchain/client";
 import { networkTransport, type NetworkConfig } from "./network.js";
 
 export interface Operation {
@@ -41,10 +41,10 @@ export function connectClient(config: NetworkConfig) {
 type Client = Awaited<ReturnType<typeof connectClient>>;
 export type Wallet = ReturnType<typeof demoWallet>;
 
-export function demoWallet(client: Client, index: number) {
+export function demoWallet(client: Client, signer: Signer) {
   return createWalletClient({
     client,
-    account: createPubkeyAccount({ signer: demoSigner(index), nonce: 0n }),
+    account: createPubkeyAccount({ signer, nonce: 0n }),
   });
 }
 

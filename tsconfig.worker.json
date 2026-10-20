@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2024"],
+    "types": ["./.cloudflare/types/index.d.ts"]
+  },
+  "include": ["server", "shared", "worker", "cloudflare.config.ts"]
+}

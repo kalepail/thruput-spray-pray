@@ -9,7 +9,12 @@ import {
 import { ThruputRpcErrorCode } from "@thruputchain/client";
 import { commandSchema } from "../server/commands.js";
 import { demoSigner } from "../server/signer.js";
-import { createPublicKey, verify } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  verify,
+} from "node:crypto";
 
 test("only authoritative admission errors discard a signed hash", () => {
   const row = { jsonrpc: "2.0" as const, id: 0 };
@@ -176,13 +181,30 @@ test("input boundary rejects invalid settings and coordinates", () => {
     false,
   );
 });
-test("native signer is deterministic, distinct per wallet, and produces valid signatures", async () => {
-  const signer = demoSigner(0);
-  assert.deepEqual(signer.publicKey, demoSigner(0).publicKey);
-  assert.notDeepEqual(signer.publicKey, demoSigner(1).publicKey);
+test("Web Crypto signer is deterministic, keeps the Node-derived keys, and signs validly", async () => {
+  const signer = await demoSigner(0);
+  assert.deepEqual(signer.publicKey, (await demoSigner(0)).publicKey);
+  assert.notDeepEqual(signer.publicKey, (await demoSigner(1)).publicKey);
+  assert.ok("ed25519" in signer.publicKey);
+  // The original Node signer derived the same seed; funded wallets must not change.
+  const seed = createHash("sha256")
+    .update("spray-and-pray/local-demo/v1/0")
+    .digest();
+  const nodeKey = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from("302e020100300506032b657004220420", "hex"),
+      seed,
+    ]),
+    format: "der",
+    type: "pkcs8",
+  });
+  assert.deepEqual(
+    Buffer.from(signer.publicKey.ed25519),
+    createPublicKey(nodeKey).export({ format: "der", type: "spki" }).subarray(-32),
+  );
   const message = new TextEncoder().encode("spray");
   const signature = await signer.sign(message);
-  assert.ok("ed25519" in signer.publicKey && "ed25519" in signature);
+  assert.ok("ed25519" in signature);
   const key = createPublicKey({
     key: Buffer.concat([
       Buffer.from("302a300506032b6570032100", "hex"),

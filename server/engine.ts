@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import { publicErrorMessage } from "./errors.js";
 import type { Chain, Operation } from "./chain.js";
 import {
@@ -21,7 +20,9 @@ export interface EngineLimits {
   submitRetries: number;
 }
 
-export function engineLimits(env: NodeJS.ProcessEnv = {}): EngineLimits {
+export function engineLimits(
+  env: Record<string, unknown> = {},
+): EngineLimits {
   const number = (name: string, fallback: number) => {
     const value = Number(env[name] ?? fallback);
     if (!Number.isFinite(value) || value < 0)
@@ -41,13 +42,22 @@ export function engineLimits(env: NodeJS.ProcessEnv = {}): EngineLimits {
   };
 }
 
+export interface EngineEvents {
+  state: Snapshot;
+  particles: { count: number; point: Point; sequence: number };
+}
+type Listeners = {
+  [K in keyof EngineEvents]: ((value: EngineEvents[K]) => void)[];
+};
+
 interface Pending {
   operation: Operation;
   sentAt: number;
   nextPoll: number;
   ready: boolean;
 }
-export class Engine extends EventEmitter {
+export class Engine {
+  private listeners: Listeners = { state: [], particles: [] };
   settings = { ...defaults };
   phase: Snapshot["phase"] = "connecting";
   message = "Connecting to Thruput";
@@ -82,7 +92,6 @@ export class Engine extends EventEmitter {
     private chain: Chain,
     limits: Partial<EngineLimits> = {},
   ) {
-    super();
     this.limits = { ...engineLimits(), ...limits };
     this.timer = setInterval(() => {
       if (this.owner && Date.now() - this.heartbeat > this.limits.leaseMs)
@@ -92,6 +101,20 @@ export class Engine extends EventEmitter {
       this.finishWork();
       this.emit("state", this.snapshot());
     }, 100);
+  }
+
+  on<K extends keyof EngineEvents>(
+    event: K,
+    listener: (value: EngineEvents[K]) => void,
+  ): void {
+    this.listeners[event].push(listener);
+  }
+
+  private emit<K extends keyof EngineEvents>(
+    event: K,
+    value: EngineEvents[K],
+  ): void {
+    for (const listener of this.listeners[event]) listener(value);
   }
 
   async configure(settings: Settings): Promise<void> {
@@ -304,7 +327,7 @@ export class Engine extends EventEmitter {
       this.finishWork();
       // Keep the submission pipeline full without tying throughput to telemetry ticks.
       // An event-loop yield lets stop messages and receipt polling run between batches.
-      setImmediate(() => this.pump());
+      setTimeout(() => this.pump(), 0);
     }
   }
 
@@ -349,10 +372,10 @@ export class Engine extends EventEmitter {
       this.polling--;
       this.finishWork();
       // Each slot refills independently; a slow RPC cannot hold the other three idle.
-      setImmediate(() => {
+      setTimeout(() => {
         this.poll();
         this.pump();
-      });
+      }, 0);
     }
   }
 

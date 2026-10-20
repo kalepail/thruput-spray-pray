@@ -4,3 +4,5 @@ dist/
 test-results/
 .env*
 !.env.example
+.cloudflare/
+.wrangler/

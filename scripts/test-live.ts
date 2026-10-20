@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { thruputChain } from "../server/chain.js";
 import { networkConfig, networkTransport } from "../server/network.js";
 
-const config = networkConfig();
+const config = networkConfig(process.env);
 const chain = thruputChain(config);
 await chain.setup(2, console.log);
 const client = await createThruputClient({

@@ -26,21 +26,34 @@ export function submissionOutcome(
   return row.result === hash ? "accepted" : "unknown";
 }
 
+export type RpcPost = (body: string) => Promise<{ status: number; text: string }>;
+
+export function fetchPost(url: string): RpcPost {
+  return async (body) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    });
+    return { status: response.status, text: await response.text() };
+  };
+}
+
 export async function rpcBatch(
-  url: string,
+  url: string | RpcPost,
   method: string,
   params: unknown[][],
 ): Promise<RpcResponse[]> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(
+  const post = typeof url === "string" ? fetchPost(url) : url;
+  const response = await post(
+    JSON.stringify(
       params.map((args, id) => ({ jsonrpc: "2.0", id, method, params: args })),
     ),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
-  const rows = z.array(responseSchema).parse(await response.json());
+  );
+  if (response.status < 200 || response.status > 299)
+    throw new Error(`RPC HTTP ${response.status}`);
+  const rows = z.array(responseSchema).parse(JSON.parse(response.text));
   const byId = new Map(rows.map((row) => [row.id, row]));
   if (byId.size !== params.length || rows.length !== params.length)
     throw new Error("RPC batch response count mismatch");

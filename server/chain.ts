@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-import { setImmediate } from "node:timers/promises";
 import { toHex0x } from "@thruputchain/client";
 import {
   connectClient,
@@ -8,16 +6,20 @@ import {
   type Operation,
   type Wallet,
 } from "./prepare.js";
-import { createPreparePool } from "./prepare-pool.js";
+import { demoSigner } from "./signer.js";
 import {
   receiptResults,
   submissionOutcome,
   rpcBatch,
+  fetchPost,
   type ReceiptPollResult,
+  type RpcPost,
 } from "./rpc.js";
-import { networkConfig, type NetworkConfig } from "./network.js";
+import type { NetworkConfig } from "./network.js";
 
 export type { Operation } from "./prepare.js";
+
+const TIP_MAX_AGE_MS = 30_000;
 export interface Chain {
   network: string;
   addresses: string[];
@@ -30,10 +32,11 @@ export interface Chain {
 }
 
 export function thruputChain(
-  config: NetworkConfig = networkConfig(),
-  options: { prepareWorkers?: number; env?: NodeJS.ProcessEnv } = {},
+  config: NetworkConfig,
+  options: { post?: RpcPost } = {},
 ): Chain {
-  const { rpcUrl, cluster } = config;
+  const { rpcUrl } = config;
+  const post = options.post ?? fetchPost(rpcUrl);
   const connect = () => connectClient(config);
   let clientPromise: ReturnType<typeof connect> | undefined;
   async function makeWallet(index: number) {
@@ -41,18 +44,15 @@ export function thruputChain(
       clientPromise = undefined;
       throw error;
     }));
-    return demoWallet(client, index);
+    return demoWallet(client, await demoSigner(index));
   }
   const wallets: Wallet[] = [];
-  const prepareInline = createPreparer(wallets);
-  const pool = options.prepareWorkers
-    ? createPreparePool(options.prepareWorkers, options.env ?? process.env)
-    : undefined;
+  const prepare = createPreparer(wallets);
   let tip = 0n;
   let tipAt = 0;
   let tipRequest: Promise<void> | undefined;
   let sequence = 0n;
-  const nonceBase = BigInt(`0x${randomBytes(8).toString("hex")}`);
+  const [nonceBase] = crypto.getRandomValues(new BigUint64Array(1));
   const chain: Chain = {
     network: config.name,
     addresses: [],
@@ -100,19 +100,23 @@ export function thruputChain(
           .finally(() => {
             tipRequest = undefined;
           });
-        await tipRequest;
+        // Expiry keeps 200+ blocks of slack, so a tip a few seconds old is safe. Waiting
+        // here would stall every batch behind the submits and polls queued for a
+        // connection.
+        if (Date.now() - tipAt > TIP_MAX_AGE_MS) await tipRequest;
+        else tipRequest.catch(() => {});
       }
       const start = sequence;
       sequence += BigInt(count);
-      const request = { start, count, walletCount, tip, nonceBase };
-      const operations = await (pool?.prepare(request) ??
-        prepareInline(request));
-      await setImmediate();
+      const request = { start, count, walletCount, tip, nonceBase: nonceBase! };
+      const operations = await prepare(request);
+      // Yield so WebSocket input and receipt polling run between batches.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       return operations;
     },
     async submit(operations) {
       const rows = await rpcBatch(
-        rpcUrl,
+        post,
         "groundhog_sendRawTransaction",
         operations.map((op) => [op.payload]),
       );
@@ -120,7 +124,7 @@ export function thruputChain(
     },
     async poll(operations) {
       const rows = await rpcBatch(
-        rpcUrl,
+        post,
         "groundhog_getTransactionReceipt",
         operations.map((op) => [op.hash]),
       );
