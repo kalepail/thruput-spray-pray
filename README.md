@@ -62,6 +62,13 @@ Other findings that shaped the code:
   cursor, so a restart continues past heights it already filled. Sustained throughput
   is therefore bounded by about 7,000 transfers per wallet per block.
 - Lanes that share a wallet take alternate expiry heights.
+- Lanes push each submitted batch to the coordinator, which draws it at once at the
+  pointer: one 256-particle burst per batch, so a drag leaves a trail as upstream did.
+- The headline confirmed rate is block-based: transfers in the last three completed
+  blocks divided by their interval. Receipts arrive in 25,000–40,000-transfer lumps
+  every ~2.5 s, so any short time window swings with block timing. Before two blocks
+  land it shows the average since the spray began; after work ends, a trailing window
+  decays to zero.
 - Every coordinator call to a lane has a deadline, and browser heartbeats are
   forwarded without waiting. One WebSocket's messages are handled in order, so a lane
   call that never returned once held back heartbeats for 7 minutes.
@@ -93,7 +100,7 @@ All settings are text bindings in `cloudflare.config.ts`.
 | `SPRAY_LANES`                           | `8`                               | Lane objects; a multiple of the four wallets                 |
 | `SPRAY_WALLET_SEED`                     | `spray-and-pray/hosted-worker/v1` | Keeps these wallets apart from the container's               |
 | `SPRAY_OUTSTANDING`                     | `32768`                           | Total in-flight transfers; devnet dropped transfers at ~49k+ |
-| `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY` | `1000`, `16`                      | Starting UI settings; concurrency is divided between lanes   |
+| `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY` | `256`, `32`                       | Starting UI settings; concurrency is divided between lanes   |
 | `SPRAY_RPC_SOCKETS`                     | `12`                              | Keep-alive sockets per lane                                  |
 | `SPRAY_PROBE_INTERVAL_MS`               | `200`                             | Poll one transfer per batch often, the rest after it lands   |
 | `SPRAY_FIRST_POLL_RATIO`                | `0.8`                             | First poll near the average receipt delay; fewer lookups     |
