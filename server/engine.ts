@@ -240,6 +240,12 @@ export class Engine {
   snapshot(): Snapshot {
     const now = Date.now();
     this.samples = this.samples.filter((sample) => now - sample.time < 5000);
+    // Rates cover the last 5 s, or less when activity began more recently, so the
+    // headline is right from the first receipts instead of ramping for 5 s.
+    const windowSeconds = Math.min(
+      5,
+      Math.max(1, (now - (this.samples[0]?.time ?? now)) / 1000),
+    );
     const elapsedMs =
       this.elapsed +
       (this.workStart === null ? 0 : performance.now() - this.workStart);
@@ -251,8 +257,9 @@ export class Engine {
       owner: this.owner,
       ...this.counts,
       pending: this.pending.size,
-      liveTps: this.samples.reduce((n, s) => n + s.succeeded, 0) / 5,
-      submitTps: this.samples.reduce((n, s) => n + s.sent, 0) / 5,
+      liveTps:
+        this.samples.reduce((n, s) => n + s.succeeded, 0) / windowSeconds,
+      submitTps: this.samples.reduce((n, s) => n + s.sent, 0) / windowSeconds,
       sendingTps: this.samples
         .filter((sample) => now - sample.time < 1000)
         .reduce((n, s) => n + s.sent, 0),

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { SprayPray, VERSION_HEADER } from "./coordinator.js";
+import { COORDINATOR, SprayPray, VERSION_HEADER } from "./coordinator.js";
 
 export { SprayPray } from "./coordinator.js";
 export { SprayLane } from "./lane.js";
@@ -18,7 +18,7 @@ function sameOrigin(request: Request): boolean {
 function coordinator() {
   const ns = env.SPRAY_PRAY as DurableObjectNamespace<SprayPray>;
   // One shared instance: every browser sees the same experiment and statistics.
-  return ns.get(ns.idFromName("spray-pray"), { locationHint: "wnam" });
+  return ns.get(ns.idFromName(COORDINATOR), { locationHint: "wnam" });
 }
 
 export default {

@@ -15,6 +15,8 @@ import type { LaneReport } from "./lane.js";
 import { laneStub, type Placement } from "./placement.js";
 
 export const VERSION_HEADER = "x-spray-pray-version";
+/** The one coordinator object every browser and lane talks to. */
+export const COORDINATOR = "spray-pray";
 const LEASE_MS = 1500;
 // Lanes need a heartbeat inside their own lease; browsers send one every 250 ms.
 const FORWARD_MS = 250;
@@ -58,6 +60,8 @@ export class SprayPray extends DurableObject<Env> {
   private forwardedAt = 0;
   private sequence = 0;
   private blocks = new Set<string>();
+  /** When each block height with our transfers was first reported by any lane. */
+  private seen = new Map<string, number>();
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -171,7 +175,7 @@ export class SprayPray extends DurableObject<Env> {
             broken = true;
             // Keep the last known totals; null would mean "not configured".
             const last = this.reports[i];
-            return last ? { ...last, particles: 0, newBlocks: [] } : null;
+            return last ? { ...last, newBlocks: [] } : null;
           }),
         ),
       );
@@ -189,21 +193,18 @@ export class SprayPray extends DurableObject<Env> {
       )
         void this.configureLanes(this.settings).catch(() => {});
       this.reports = reports;
-      let particles = 0;
-      for (const report of reports) {
-        if (!report) continue;
-        particles += report.particles;
-        for (const height of report.newBlocks) this.blocks.add(height);
-      }
-      if (particles) {
-        this.sequence += particles;
-        this.broadcast({
-          type: "particles",
-          count: particles,
-          point: { ...this.point },
-          sequence: this.sequence,
-        });
-      }
+      for (const report of reports)
+        for (const height of report?.newBlocks ?? []) {
+          this.blocks.add(height);
+          if (!this.seen.has(height)) this.seen.set(height, Date.now());
+        }
+      // Keep only recent heights; the block rate looks at the last few.
+      if (this.seen.size > 32)
+        for (const height of [...this.seen.keys()].slice(
+          0,
+          this.seen.size - 32,
+        ))
+          this.seen.delete(height);
       const state = this.snapshot();
       this.broadcast({ type: "state", state });
       this.stopIfIdle(state);
@@ -226,6 +227,49 @@ export class SprayPray extends DurableObject<Env> {
       if (this.timer !== undefined) clearInterval(this.timer);
       this.timer = undefined;
     }
+  }
+
+  /**
+   * A lane submitted a batch: draw it now, where the pointer is now. One burst per
+   * batch keeps the upstream feel of a trail that follows a drag.
+   */
+  particles(count: number): void {
+    this.sequence += count;
+    this.broadcast({
+      type: "particles",
+      count,
+      point: { ...this.point },
+      sequence: this.sequence,
+    });
+  }
+
+  /**
+   * Confirmed transfers per second over the last three completed blocks. Receipts
+   * arrive in block-sized lumps (25-40k every ~2.5 s), so any short time window
+   * swings with block timing; a block-to-block rate is accurate as soon as two blocks
+   * land. Undefined until then, and once blocks stop, so the caller falls back to the
+   * lanes' trailing-window rate, which decays to zero.
+   */
+  private blockRate(
+    counts: Map<string, number>,
+    working: boolean,
+  ): number | undefined {
+    const heights = [...counts.keys()]
+      .filter((height) => this.seen.has(height))
+      .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+    const latest = heights.at(-1);
+    if (!latest || Date.now() - this.seen.get(latest)! > 5_000)
+      return undefined;
+    // While transfers are in flight the newest block may still be collecting receipts.
+    const complete = working ? heights.slice(0, -1) : heights;
+    // The rate needs the block before the counted ones as the start of its interval.
+    const counted = complete.slice(Math.max(1, complete.length - 3));
+    const before = heights[heights.indexOf(counted[0]!) - 1];
+    if (!counted.length || !before) return undefined;
+    const seconds =
+      (this.seen.get(counted.at(-1)!)! - this.seen.get(before)!) / 1000;
+    if (seconds <= 0) return undefined;
+    return counted.reduce((n, h) => n + counts.get(h)!, 0) / seconds;
   }
 
   snapshot(): Snapshot {
@@ -251,6 +295,7 @@ export class SprayPray extends DurableObject<Env> {
     let message: string;
     const laneError = lanes.find((s) => s.phase === "error");
     const pending = sum((s) => s.pending);
+    const working = pending > 0 || this.owner !== null;
     if (this.setupError || laneError) {
       phase = "error";
       message = this.setupError ?? laneError!.message;
@@ -283,7 +328,12 @@ export class SprayPray extends DurableObject<Env> {
       unresolved: sum((s) => s.unresolved),
       resubmitted: sum((s) => s.resubmitted),
       pending,
-      liveTps: sum((s) => s.liveTps),
+      // Before two blocks land, the average since the spray began rises smoothly;
+      // after work ends, the trailing window decays to zero.
+      liveTps:
+        (this.blockRate(byHeight, working) ??
+          (working && elapsedMs ? (succeeded * 1000) / elapsedMs : 0)) ||
+        sum((s) => s.liveTps),
       submitTps: sum((s) => s.submitTps),
       sendingTps: sum((s) => s.sendingTps),
       recentBlocks: [...byHeight]
@@ -351,6 +401,7 @@ export class SprayPray extends DurableObject<Env> {
       lanes.map((lane) => deadline(lane.reset(), LANE_CALL_MS)),
     );
     this.blocks.clear();
+    this.seen.clear();
     this.errors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.
     this.reports = await Promise.all(

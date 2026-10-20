@@ -543,3 +543,18 @@ test("scheduler retry resends identical bytes; dropped transfers fail", async (t
   const first = new Set(sent.slice(0, state.attempted));
   for (const copy of sent.slice(state.attempted)) assert.ok(first.has(copy));
 });
+
+test("live rates use the covered window, not a fixed 5 s, after activity starts", async (t) => {
+  const engine = fixture({}, { outstanding: 4 });
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().succeeded >= 4);
+  engine.stop("a");
+  const { liveTps, succeeded } = engine.snapshot();
+  // Under one second of activity: the window is clamped to 1 s, not 5 s.
+  assert.ok(
+    liveTps >= succeeded,
+    `liveTps ${liveTps} for ${succeeded} receipts`,
+  );
+});

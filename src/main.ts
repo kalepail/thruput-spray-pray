@@ -117,6 +117,33 @@ setInterval(() => {
   if (held) send({ type: "spray", point });
 }, 250);
 
+/**
+ * The headline numbers glide toward each new value between the ten state updates a
+ * second, so they read as live rather than stepping. A drop (a reset) snaps at once.
+ */
+const eased: Record<string, { shown: number; target: number }> = {
+  "live-tps": { shown: 0, target: 0 },
+  "total-confirmed": { shown: 0, target: 0 },
+};
+let easedAt = performance.now();
+function ease(now: number): void {
+  const step = 1 - Math.exp(-(now - easedAt) / 160);
+  easedAt = now;
+  for (const [id, value] of Object.entries(eased)) {
+    const next =
+      value.target < value.shown && id === "total-confirmed"
+        ? value.target
+        : value.shown + (value.target - value.shown) * step;
+    // Settle exactly on the target once the remaining gap rounds away.
+    value.shown = Math.abs(value.target - next) < 0.5 ? value.target : next;
+    const text = format.format(value.shown);
+    const node = element(id);
+    if (node.textContent !== text) node.textContent = text;
+  }
+  requestAnimationFrame(ease);
+}
+requestAnimationFrame(ease);
+
 function update(snapshot: Snapshot): void {
   state = snapshot;
   const spraying = state.phase === "spraying";
@@ -144,8 +171,10 @@ function update(snapshot: Snapshot): void {
     unresolved: state.unresolved,
     attempted: state.attempted,
   };
-  for (const [id, value] of Object.entries(metrics))
-    element(id).textContent = format.format(value);
+  for (const [id, value] of Object.entries(metrics)) {
+    if (id in eased) eased[id]!.target = value;
+    else element(id).textContent = format.format(value);
+  }
   element("sending-tps").textContent = format.format(state.sendingTps);
   element("in-flight").textContent = format.format(state.pending);
   const bars = element("block-bars").children;

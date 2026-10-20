@@ -44,8 +44,8 @@ export default defineConfig({
       SPRAY_LANES: bindings.text("8"),
       // Distinct from the container's wallets, so both deployments never share them.
       SPRAY_WALLET_SEED: bindings.text("spray-and-pray/hosted-worker/v1"),
-      SPRAY_BATCH_SIZE: bindings.text("1000"),
-      SPRAY_CONCURRENCY: bindings.text("16"),
+      SPRAY_BATCH_SIZE: bindings.text("256"),
+      SPRAY_CONCURRENCY: bindings.text("32"),
       // Devnet silently dropped accepted transfers with ~49k+ in flight.
       SPRAY_OUTSTANDING: bindings.text("32768"),
       SPRAY_POLL_CONCURRENCY: bindings.text("8"),

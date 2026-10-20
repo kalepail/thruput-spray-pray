@@ -1,4 +1,5 @@
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, env } from "cloudflare:workers";
+import { COORDINATOR, type SprayPray } from "./coordinator.js";
 import type { Point, Settings, Snapshot } from "../shared/protocol.js";
 import { thruputChain } from "../server/chain.js";
 import { Engine, engineLimits } from "../server/engine.js";
@@ -10,6 +11,11 @@ import { isNewerVersion, measureHost, type Host } from "./host.js";
 // so the object can be evicted.
 const ORPHAN_MS = 2 * 60_000;
 const OWNER = "coordinator";
+
+function coordinator() {
+  const ns = env.SPRAY_PRAY as DurableObjectNamespace<SprayPray>;
+  return ns.get(ns.idFromName(COORDINATOR));
+}
 
 function engineNumber(
   vars: Record<string, unknown>,
@@ -30,8 +36,6 @@ export interface LaneReport {
   receiptCount: number;
   /** Heights with successful transfers first seen since the previous report. */
   newBlocks: string[];
-  /** Transfers attempted since the previous report, for particles. */
-  particles: number;
   /** Worker version this lane runs. */
   version: string;
 }
@@ -43,7 +47,6 @@ export interface LaneReport {
 export class SprayLane extends DurableObject<Env> {
   private engine?: Engine;
   private host?: Promise<Host>;
-  private particles = 0;
   private reportedBlocks = 0;
   private lastReport = Date.now();
   private orphanTimer?: ReturnType<typeof setInterval>;
@@ -101,7 +104,12 @@ export class SprayLane extends DurableObject<Env> {
         }),
         { ...engineLimits(vars), outstanding },
       );
-      engine.on("particles", ({ count }) => (this.particles += count));
+      // Push each submitted batch at once so the trail follows the pointer.
+      engine.on("particles", ({ count }) => {
+        void coordinator()
+          .particles(count)
+          .catch(() => {});
+      });
       this.engine = engine;
       this.orphanTimer = setInterval(() => {
         if (Date.now() - this.lastReport > ORPHAN_MS) this.close();
@@ -138,11 +146,9 @@ export class SprayLane extends DurableObject<Env> {
       receiptTimeMs: totals.receiptTimeMs,
       receiptCount: totals.receiptCount,
       newBlocks: totals.blocks.slice(this.reportedBlocks),
-      particles: this.particles,
       version: this.env.VERSION.id,
     };
     this.reportedBlocks = totals.blocks.length;
-    this.particles = 0;
     return report;
   }
 
