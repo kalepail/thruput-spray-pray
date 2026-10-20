@@ -7,6 +7,7 @@ import {
   type Wallet,
 } from "./prepare.js";
 import { demoSigner } from "./signer.js";
+import { expiryAllocator, type ExpiryOptions } from "./expiry.js";
 import {
   receiptResults,
   submissionOutcome,
@@ -46,6 +47,8 @@ export function thruputChain(
     slots?: number;
     /** Wallet key seed; see demoSigner. */
     walletSeed?: string;
+    /** Per-sender expiry allocation; see expiryAllocator. Counter buckets if omitted. */
+    expiry?: Omit<ExpiryOptions, "slot" | "slots">;
   } = {},
 ): Chain {
   const { senders, slot, slots, walletSeed } = options;
@@ -62,6 +65,19 @@ export function thruputChain(
   }
   const wallets: Wallet[] = [];
   const prepare = createPreparer(wallets);
+  const expiry = options.expiry
+    ? expiryAllocator({ ...options.expiry, slot: slot ?? 0, slots: slots ?? 1 })
+    : undefined;
+  const refreshTip = (first: Wallet) =>
+    (tipRequest ??= first
+      .getChainTip()
+      .then((value) => {
+        tip = value.height;
+        tipAt = Date.now();
+      })
+      .finally(() => {
+        tipRequest = undefined;
+      }));
   let tip = 0n;
   let tipAt = 0;
   let tipRequest: Promise<void> | undefined;
@@ -111,23 +127,33 @@ export function thruputChain(
       const first = wallets[0];
       if (!first) throw new Error("Wallet pool is not ready");
       if (Date.now() - tipAt > 2_000) {
-        tipRequest ??= first
-          .getChainTip()
-          .then((value) => {
-            tip = value.height;
-            tipAt = Date.now();
-          })
-          .finally(() => {
-            tipRequest = undefined;
-          });
-        // Expiry keeps 200+ blocks of slack, so a tip a few seconds old is safe. Waiting
+        const refresh = refreshTip(first);
+        // Expiry keeps blocks of slack, so a tip a few seconds old is safe. Waiting
         // here would stall every batch behind the submits and polls queued for a
         // connection.
-        if (Date.now() - tipAt > TIP_MAX_AGE_MS) await tipRequest;
-        else tipRequest.catch(() => {});
+        if (Date.now() - tipAt > TIP_MAX_AGE_MS) await refresh;
+        else refresh.catch(() => {});
       }
       const start = sequence;
       sequence += BigInt(count);
+      let expiryHeights: bigint[] | undefined;
+      if (expiry) {
+        expiryHeights = [];
+        for (let i = 0; i < count; i++) {
+          const current = start + BigInt(i);
+          const sender = senders
+            ? senders[Number(current % BigInt(senders.length))]!
+            : Number(current % BigInt(walletCount));
+          let height = expiry.next(sender, tip);
+          // Every usable height is full: wait for blocks to open new ones.
+          while (height === undefined) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            await refreshTip(first).catch(() => {});
+            height = expiry.next(sender, tip);
+          }
+          expiryHeights.push(height);
+        }
+      }
       const request = {
         start,
         count,
@@ -137,6 +163,7 @@ export function thruputChain(
         senders,
         slot,
         slots,
+        expiryHeights,
       };
       const operations = await prepare(request);
       // Yield so WebSocket input and receipt polling run between batches.

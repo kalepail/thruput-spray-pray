@@ -11,6 +11,19 @@ import { isNewerVersion, measureHost, type Host } from "./host.js";
 const ORPHAN_MS = 2 * 60_000;
 const OWNER = "coordinator";
 
+function engineNumber(
+  vars: Record<string, unknown>,
+  name: string,
+  fallback: number,
+) {
+  const raw =
+    typeof vars[name] === "string" ? (vars[name] as string).trim() : "";
+  const value = raw ? Number(raw) : fallback;
+  if (!Number.isInteger(value) || value < 1)
+    throw new Error(`${name} must be an integer of at least 1`);
+  return value;
+}
+
 export interface LaneReport {
   snapshot: Snapshot;
   receiptTimeMs: number;
@@ -66,6 +79,20 @@ export class SprayLane extends DurableObject<Env> {
           senders: [lane.sender],
           slot: lane.slot,
           slots: lane.slots,
+          expiry: {
+            ahead: BigInt(engineNumber(vars, "SPRAY_EXPIRY_AHEAD", 30)),
+            window: BigInt(engineNumber(vars, "SPRAY_EXPIRY_WINDOW", 20)),
+            perHeight: engineNumber(vars, "SPRAY_NONCES_PER_HEIGHT", 7000),
+            // Durable storage lets a restarted lane continue past heights it filled.
+            resume: (sender) => {
+              const height = this.ctx.storage.kv.get<string>(
+                `expiry:${sender}`,
+              );
+              return height === undefined ? undefined : BigInt(height);
+            },
+            onHeight: (sender, height) =>
+              this.ctx.storage.kv.put(`expiry:${sender}`, height.toString()),
+          },
           walletSeed:
             (vars.SPRAY_WALLET_SEED as string | undefined) || undefined,
           post: sockets

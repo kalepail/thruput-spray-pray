@@ -38,6 +38,8 @@ export interface PrepareRequest {
    */
   slot?: number;
   slots?: number;
+  /** Expiry height for each transfer; the counter-based buckets when omitted. */
+  expiryHeights?: bigint[];
 }
 
 export function connectClient(config: NetworkConfig) {
@@ -87,12 +89,13 @@ export function createPreparer(wallets: Wallet[]) {
         // Spread replay-cache buckets even when a low-wallet burst shares a tip:
         // about 4,000 transfers per sender share an expiry height.
         blockExpiryHeight: blockHeight(
-          request.tip +
-            200n +
-            (((current / BigInt((senders?.length ?? walletCount) * 4_000)) *
-              BigInt(request.slots ?? 1) +
-              BigInt(request.slot ?? 0)) %
-              100n),
+          request.expiryHeights?.[i] ??
+            request.tip +
+              200n +
+              (((current / BigInt((senders?.length ?? walletCount) * 4_000)) *
+                BigInt(request.slots ?? 1) +
+                BigInt(request.slot ?? 0)) %
+                100n),
         ),
       });
       const signed = await wallet.signTransaction(transaction);

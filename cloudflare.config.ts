@@ -58,6 +58,11 @@ export default defineConfig({
       SPRAY_SUBMIT_RETRIES: bindings.text("2"),
       // Ask the scheduler about receipts missing this long; resend on `retry`.
       SPRAY_STATUS_AFTER_MS: bindings.text("6000"),
+      // Replay caches hold at most 8,000 nonces per sender per expiry height; see
+      // server/expiry.ts. Expiries start 30 blocks ahead, inside a 20-height window.
+      SPRAY_EXPIRY_AHEAD: bindings.text("30"),
+      SPRAY_EXPIRY_WINDOW: bindings.text("20"),
+      SPRAY_NONCES_PER_HEIGHT: bindings.text("7000"),
     },
   },
 });
