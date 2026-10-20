@@ -2,6 +2,8 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { cpus } from "node:os";
+import { performance } from "node:perf_hooks";
 import { WebSocketServer, WebSocket } from "ws";
 import { defaults, type ServerMessage } from "../shared/protocol.js";
 import { commandSchema, settingsSchema } from "./commands.js";
@@ -38,6 +40,25 @@ const mime: Record<string, string> = {
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
 };
+// CPU and event-loop load since the previous state request, for capacity diagnosis.
+let lastCpu = process.cpuUsage();
+let lastLoop = performance.eventLoopUtilization();
+let lastAt = performance.now();
+function runtime() {
+  const now = performance.now();
+  const cpu = process.cpuUsage(lastCpu);
+  const loop = performance.eventLoopUtilization(lastLoop);
+  const wallMs = Math.max(1, now - lastAt);
+  lastCpu = process.cpuUsage();
+  lastLoop = performance.eventLoopUtilization();
+  lastAt = now;
+  return {
+    cores: cpus().length,
+    cpuPercent: Math.round(((cpu.user + cpu.system) / 1000 / wallMs) * 100),
+    eventLoopUtilization: Math.round(loop.utilization * 100) / 100,
+    intervalMs: Math.round(wallMs),
+  };
+}
 const server = createServer(async (req, res) => {
   if (req.url === "/api/state" || req.url === "/api/export") {
     res.setHeader("Content-Type", "application/json");
@@ -46,6 +67,7 @@ const server = createServer(async (req, res) => {
       JSON.stringify({
         ...engine.snapshot(),
         exportedAt: new Date().toISOString(),
+        runtime: runtime(),
         measurement:
           "Successful committed receipts observed by this Node process; experiment throughput, not global network TPS",
       }),
