@@ -5,8 +5,10 @@ Durable Objects with no container.
 
 - URL: https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev
 - Account: Ecosystem - Stellar (`cf` profile `default`)
-- Source: a fork of `groundhog-experiments/spray-pray` with the container session's
-  throughput patches (`thruput-spray-pray-hosted/.work`, remote `hosted-work`).
+- Source: upstream `groundhog-experiments/spray-pray` plus all the throughput work
+  from the former container deployment (merged from its patch workspace, `c7b836e`),
+  rebuilt for Workers. The upstream checkout is pull-only, so this repository carries
+  the changes; `git diff 810c856` shows the full delta from upstream.
 
 The browser UI is unchanged. Every transfer is a real `ERC20.transfer` of one base unit
 of HOG between four demo wallets on devnet.
@@ -64,11 +66,14 @@ Other findings that shaped the code:
 ```sh
 GH_NPM_TOKEN="$(gh auth token)" npm ci
 npm run check
-npm run deploy        # cf deploy; no Docker
+npm run deploy        # scripts/deploy.sh; no Docker
 ```
 
 A deploy restarts objects that hold running timers. The Worker sends its version
-timestamp with each request, and an older object resets itself.
+timestamp with each request, and an older object resets itself. `scripts/deploy.sh`
+runs `cf deploy`, then polls `/api/state` until `build.version` equals the new version
+ID, every lane reports it, and the phase is `ready`. It exits non-zero after about
+5 minutes otherwise.
 
 ## Settings
 
@@ -83,7 +88,19 @@ All settings are text bindings in `cloudflare.config.ts`.
 | `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY` | `1000`, `16`                      | Starting UI settings; concurrency is divided between lanes   |
 | `SPRAY_RPC_SOCKETS`                     | `12`                              | Keep-alive sockets per lane                                  |
 | `SPRAY_PROBE_INTERVAL_MS`               | `200`                             | Poll one transfer per batch often, the rest after it lands   |
+| `SPRAY_FIRST_POLL_RATIO`                | `0.8`                             | First poll near the average receipt delay; fewer lookups     |
+| `SPRAY_POLL_CONCURRENCY`, `_BATCH`      | `8`, `1000`                       | Receipt lookups per lane; RPC arrays take up to 1,000        |
+| `SPRAY_SUBMIT_RETRIES`                  | `2`                               | Resend identical bytes only after a lost connection          |
 | `SPRAY_STATUS_AFTER_MS`                 | `6000`                            | Check scheduler status for receipts this late                |
+
+Engine limits are validated: integers, at least 1 where 0 would stall the engine, and
+a first-poll ratio between 0 and 2. Resends never follow an HTTP status. Devnet answers
+a duplicate of an admitted transfer with the same hash, so a rejection after a resend
+counts as Failed.
+
+Do not raise `SPRAY_OUTSTANDING` above 32768 without a clean re-measurement. At
+49152 and above, many accepted transfers reported `retry` (two-phase-commit storage
+conflicts) instead of committing, and 32768 already saturates devnet.
 
 ## After a devnet wipe
 
@@ -107,8 +124,29 @@ APP_URL=https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev \
   CHROMIUM_PATH="<Chromium executable>" npm run test:browser
 ```
 
-`/api/state` also lists each lane's data center and round trip to the RPC. Only one
-deployment should spray devnet at a time.
+`/api/state` also lists each lane's data center and round trip to the RPC, and the
+`build` stamp. `npm run test:security` checks the deployed app without spraying.
+`test:browser` restores the app's starting settings when it finishes.
+
+The load and browser tests send real transfers to shared devnet. Agree a window with
+anyone else load-testing devnet first, and keep only one sprayer running.
+
+## History
+
+Measured on 2026-10-20 (devnet 0.29.2, wire 11.2.0). Successful tx/s includes the
+drain after release; failed and unresolved were 0 in every row.
+
+| Configuration                                              | tx/s          |
+| ---------------------------------------------------------- | ------------- |
+| Upstream app in a `standard-2` container, 128 / 4          | 1,917         |
+| Tuned container, `standard-4`, 4 signing threads, 256 / 32 | 10,865–12,743 |
+| Tuned container, clean devnet, 30 s ×2                     | 9,405 / 9,817 |
+| Workers, 8 lanes, clean devnet, 1000 / 16, 30 s ×4         | 10,637–12,340 |
+
+The container limits were, in order: the 8,192 in-flight cap, receipt polling, then
+signing CPU. While spraying, devnet blocks carry 25,000–41,000 transfers and stretch
+from 2.0 s to 2.2–3.3 s, so devnet itself is near saturation. Shared-devnet load
+varies from run to run.
 
 ## Cost
 
