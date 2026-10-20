@@ -1,4 +1,5 @@
 import { connect } from "cloudflare:sockets";
+import { RpcConnectionError } from "./errors.js";
 
 /**
  * JSON-RPC POSTs over a pool of persistent HTTP/1.1 keep-alive TLS sockets.
@@ -101,7 +102,7 @@ class Connection {
       const { value, done } = await this.reader.read();
       if (done) {
         this.dead = true;
-        throw new Error("RPC connection closed");
+        throw new RpcConnectionError("RPC connection closed");
       }
       this.buffer = concat([this.buffer, value as Uint8Array]);
     }
@@ -117,7 +118,7 @@ class Connection {
       const { value, done } = await this.reader.read();
       if (done) {
         this.dead = true;
-        throw new Error("RPC connection closed");
+        throw new RpcConnectionError("RPC connection closed");
       }
       const chunk = value as Uint8Array;
       const take = Math.min(chunk.length, length - filled);
@@ -208,7 +209,7 @@ export function socketPool(url: string, size: number): SocketPool {
             connection.post(pathname || "/", body),
             new Promise<never>((_, reject) => {
               timer = setTimeout(
-                () => reject(new Error("RPC request timed out")),
+                () => reject(new RpcConnectionError("RPC request timed out")),
                 TIMEOUT_MS,
               );
             }),

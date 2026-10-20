@@ -362,6 +362,14 @@ export class SprayPray extends DurableObject<Env> {
         ...this.snapshot(),
         exportedAt: new Date().toISOString(),
         lanes: await this.hosts(),
+        // Deploys are done when every object runs this version; see scripts/deploy.sh.
+        build: {
+          version: this.env.VERSION.id,
+          lanes: this.laneCount,
+          lanesOnVersion: this.reports.filter(
+            (r) => r?.version === this.env.VERSION.id,
+          ).length,
+        },
         measurement:
           "Successful committed receipts observed by this experiment's lanes; experiment throughput, not global network TPS",
       },

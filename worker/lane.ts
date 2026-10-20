@@ -19,6 +19,8 @@ export interface LaneReport {
   newBlocks: string[];
   /** Transfers attempted since the previous report, for particles. */
   particles: number;
+  /** Worker version this lane runs. */
+  version: string;
 }
 
 /**
@@ -110,6 +112,7 @@ export class SprayLane extends DurableObject<Env> {
       receiptCount: totals.receiptCount,
       newBlocks: totals.blocks.slice(this.reportedBlocks),
       particles: this.particles,
+      version: this.env.VERSION.id,
     };
     this.reportedBlocks = totals.blocks.length;
     this.particles = 0;

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
-import type { Snapshot } from "../shared/protocol.js";
+import WebSocket from "ws";
+import type { Settings, Snapshot } from "../shared/protocol.js";
 import { browserOptions } from "./browser-options.js";
 
 const url = process.env.APP_URL ?? "http://127.0.0.1:5177";
@@ -28,6 +29,32 @@ async function waitReady() {
     `Pipeline did not become ready: ${JSON.stringify(await state())}`,
   );
 }
+/** The test tunes the shared app; put back the settings it found. */
+async function restoreSettings(settings: Settings) {
+  await waitReady();
+  const socket = new WebSocket(`${url.replace(/^http/, "ws")}/live`);
+  await new Promise((resolve, reject) =>
+    socket.once("open", resolve).once("error", reject),
+  );
+  try {
+    socket.send(JSON.stringify({ type: "configure", settings }));
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      const current = await state();
+      if (
+        current.phase === "ready" &&
+        current.settings.batchSize === settings.batchSize &&
+        current.settings.concurrency === settings.concurrency
+      )
+        return;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error("Could not restore the starting settings");
+  } finally {
+    socket.terminate();
+  }
+}
+const starting = (await state()).settings;
 try {
   await page.goto(url);
   await waitReady();
@@ -207,4 +234,5 @@ try {
   );
 } finally {
   await browser.close();
+  await restoreSettings(starting);
 }
