@@ -327,7 +327,10 @@ export class SprayPray extends DurableObject<Env> {
     await Promise.all(lanes.map((lane) => lane.reset()));
     this.blocks.clear();
     this.errors = [];
-    this.reports = [];
+    // Report now: an empty report list would read as "connecting" until the next tick.
+    this.reports = await Promise.all(
+      lanes.map((lane) => lane.report(this.version()).catch(() => null)),
+    );
   }
 
   private recordError(error: unknown): string {
