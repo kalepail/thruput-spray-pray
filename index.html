@@ -129,7 +129,7 @@
                   name="concurrency"
                   type="number"
                   min="1"
-                  max="16"
+                  max="32"
                   value="4"
                   required
               /></label>
@@ -253,8 +253,8 @@
             RPC and polling time.
           </p>
           <p>
-            Start with 4 concurrent requests. More requests can increase RPC and
-            receipt contention rather than throughput.
+            The server sets the starting values. More requests can increase RPC
+            and receipt contention rather than throughput.
           </p>
         </details>
         <div id="errors" class="error-details" hidden>

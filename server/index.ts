@@ -4,9 +4,9 @@ import { resolve, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { defaults, type ServerMessage } from "../shared/protocol.js";
-import { commandSchema } from "./commands.js";
+import { commandSchema, settingsSchema } from "./commands.js";
 import { thruputChain } from "./chain.js";
-import { Engine } from "./engine.js";
+import { Engine, engineLimits } from "./engine.js";
 import { networkConfig } from "./network.js";
 import { publicErrorMessage } from "./errors.js";
 
@@ -15,7 +15,16 @@ const host = process.env.HOST ?? "127.0.0.1";
 const network = networkConfig();
 const { rpcUrl } = network;
 const production = import.meta.url.includes("/dist/");
-const engine = new Engine(thruputChain(network));
+const startingSettings = settingsSchema.parse({
+  batchSize: Number(process.env.SPRAY_BATCH_SIZE ?? defaults.batchSize),
+  concurrency: Number(process.env.SPRAY_CONCURRENCY ?? defaults.concurrency),
+});
+const engine = new Engine(
+  thruputChain(network, {
+    prepareWorkers: Number(process.env.SPRAY_PREPARE_WORKERS ?? 0),
+  }),
+  engineLimits(process.env),
+);
 const vite = production
   ? undefined
   : await (
@@ -138,7 +147,7 @@ server.listen(port, host, () => {
   console.log(`Spray & Pray: http://${host}:${port}`);
   console.log(`${network.name} RPC: ${new URL(rpcUrl).origin}`);
   void engine
-    .configure(defaults)
+    .configure(startingSettings)
     .catch((error: unknown) =>
       console.error("Setup:", publicErrorMessage(error)),
     );

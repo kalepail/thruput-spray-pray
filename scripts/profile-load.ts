@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { Engine } from "../server/engine.js";
+import { Engine, engineLimits } from "../server/engine.js";
 import { thruputChain } from "../server/chain.js";
 import type { Snapshot } from "../shared/protocol.js";
 
@@ -17,13 +17,18 @@ function summary(state: Snapshot) {
     observedBlocks: state.observedBlocks,
     averageTxPerBlock: state.averageTxPerBlock,
     averageReceiptMs: Math.round(state.averageReceiptMs),
+    errors: state.errors,
   };
 }
 
 const concurrency = Number(process.env.LOAD_CONCURRENCY ?? 4);
-if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16)
-  throw new Error("LOAD_CONCURRENCY must be between 1 and 16");
-const chain = thruputChain();
+if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64)
+  throw new Error("LOAD_CONCURRENCY must be between 1 and 64");
+const batchSize = Number(process.env.LOAD_BATCH ?? 128);
+const loadSeconds = Number(process.env.LOAD_SECONDS ?? 10);
+const chain = thruputChain(undefined, {
+  prepareWorkers: Number(process.env.SPRAY_PREPARE_WORKERS ?? 0),
+});
 const durations = {
   prepare: [] as number[],
   submit: [] as number[],
@@ -58,16 +63,16 @@ const measured = {
     }
   },
 };
-const engine = new Engine(measured);
+const engine = new Engine(measured, engineLimits(process.env));
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 try {
-  await engine.configure({ batchSize: 128, concurrency });
+  await engine.configure({ batchSize, concurrency });
   const cpuStart = process.cpuUsage();
   const start = performance.now();
   const spray = () => engine.spray("profile", { x: 0.5, y: 0.5 });
   spray();
   heartbeat = setInterval(spray, 250);
-  await sleep(10_000);
+  await sleep(loadSeconds * 1000);
   clearInterval(heartbeat);
   engine.stop("profile");
   const atRelease = engine.snapshot();

@@ -9,6 +9,38 @@ import {
   type Snapshot,
 } from "../shared/protocol.js";
 
+export interface EngineLimits {
+  outstanding: number;
+  receiptTimeoutMs: number;
+  leaseMs: number;
+  pollConcurrency: number;
+  pollBatch: number;
+  firstPollMs: number;
+  firstPollRatio: number;
+  pollIntervalMs: number;
+  submitRetries: number;
+}
+
+export function engineLimits(env: NodeJS.ProcessEnv = {}): EngineLimits {
+  const number = (name: string, fallback: number) => {
+    const value = Number(env[name] ?? fallback);
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error(`${name} must be a non-negative number`);
+    return value;
+  };
+  return {
+    outstanding: number("SPRAY_OUTSTANDING", 8192),
+    receiptTimeoutMs: 60_000,
+    leaseMs: 1500,
+    pollConcurrency: number("SPRAY_POLL_CONCURRENCY", 4),
+    pollBatch: number("SPRAY_POLL_BATCH", 256),
+    firstPollMs: number("SPRAY_FIRST_POLL_MS", 300),
+    firstPollRatio: number("SPRAY_FIRST_POLL_RATIO", 0),
+    pollIntervalMs: number("SPRAY_POLL_INTERVAL_MS", 500),
+    submitRetries: number("SPRAY_SUBMIT_RETRIES", 0),
+  };
+}
+
 interface Pending {
   operation: Operation;
   sentAt: number;
@@ -44,17 +76,16 @@ export class Engine extends EventEmitter {
   private workStart: number | null = null;
   private timer: ReturnType<typeof setInterval>;
 
+  private limits: EngineLimits;
+
   constructor(
     private chain: Chain,
-    private limits = {
-      outstanding: 8192,
-      receiptTimeoutMs: 60_000,
-      leaseMs: 1500,
-    },
+    limits: Partial<EngineLimits> = {},
   ) {
     super();
+    this.limits = { ...engineLimits(), ...limits };
     this.timer = setInterval(() => {
-      if (this.owner && Date.now() - this.heartbeat > limits.leaseMs)
+      if (this.owner && Date.now() - this.heartbeat > this.limits.leaseMs)
         this.stop(this.owner);
       this.pump();
       this.poll();
@@ -212,7 +243,7 @@ export class Engine extends EventEmitter {
         this.pending.set(operation.hash, {
           operation,
           sentAt,
-          nextPoll: sentAt + 300,
+          nextPoll: sentAt + this.firstPollDelay(),
           ready: false,
         });
       }
@@ -228,11 +259,27 @@ export class Engine extends EventEmitter {
         sequence: this.counts.attempted,
       });
       try {
-        const outcomes = await this.chain.submit(operations);
+        let outcomes: Awaited<ReturnType<Chain["submit"]>> | undefined;
+        let resent = false;
+        for (let attempt = 0; !outcomes; attempt++) {
+          try {
+            outcomes = await this.chain.submit(operations);
+          } catch (error) {
+            // A lost response can hide admission. Resending the identical signed
+            // bytes is idempotent; it never replaces a transfer with a new one.
+            if (attempt >= this.limits.submitRetries) throw error;
+            this.recordError(error);
+            resent = true;
+            await new Promise((resolve) =>
+              setTimeout(resolve, 250 * (attempt + 1)),
+            );
+          }
+        }
         for (let i = 0; i < operations.length; i++) {
           const hash = operations[i]!.hash;
           if (outcomes[i] === "accepted") this.counts.accepted++;
-          else if (outcomes[i] === "rejected") {
+          // After a resend, a rejection may be the duplicate of an admitted copy.
+          else if (outcomes[i] === "rejected" && !resent) {
             this.settle(hash, "failed");
             this.recordError("RPC rejected a transfer before admission");
           } else
@@ -263,14 +310,14 @@ export class Engine extends EventEmitter {
 
   private poll(): void {
     if (this.closed) return;
-    while (this.polling < 4) {
+    while (this.polling < this.limits.pollConcurrency) {
       const now = Date.now();
       const batch: Pending[] = [];
       for (const item of this.pending.values()) {
         if (item.ready && item.nextPoll <= now) {
           batch.push(item);
           item.nextPoll = Infinity;
-          if (batch.length === 256) break;
+          if (batch.length === this.limits.pollBatch) break;
         }
       }
       if (batch.length === 0) break;
@@ -296,7 +343,7 @@ export class Engine extends EventEmitter {
           this.settle(item.operation.hash, "unresolved");
           this.recordError("Receipt deadline reached; outcome unresolved");
         } else {
-          item.nextPoll = Date.now() + 500;
+          item.nextPoll = Date.now() + this.limits.pollIntervalMs;
         }
       }
       this.polling--;
@@ -307,6 +354,17 @@ export class Engine extends EventEmitter {
         this.pump();
       });
     }
+  }
+
+  /** Skip lookups that would almost certainly miss: most receipts arrive near the observed average. */
+  private firstPollDelay(): number {
+    const average = this.receiptCount
+      ? this.receiptTimeMs / this.receiptCount
+      : 0;
+    return Math.max(
+      this.limits.firstPollMs,
+      average * this.limits.firstPollRatio,
+    );
   }
 
   private settle(

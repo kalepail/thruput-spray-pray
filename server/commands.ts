@@ -3,7 +3,7 @@ import type { Settings, Point } from "../shared/protocol.js";
 
 export const settingsSchema = z.strictObject({
   batchSize: z.number().int().min(1).max(256),
-  concurrency: z.number().int().min(1).max(16),
+  concurrency: z.number().int().min(1).max(32),
 }) satisfies z.ZodType<Settings>;
 const pointSchema = z.object({
   x: z.number().min(0).max(1),

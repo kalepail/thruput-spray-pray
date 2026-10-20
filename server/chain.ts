@@ -1,39 +1,23 @@
 import { randomBytes } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
+import { toHex0x } from "@thruputchain/client";
 import {
-  createThruputClient,
-  createPubkeyAccount,
-  createWalletClient,
-  hashSignedTransaction,
-  serializeSignedTransaction,
-  toHex0x,
-} from "@thruputchain/client";
-import { ERC20 } from "@thruputchain/client/contracts";
-import {
-  HOG_ADDRESS,
-  blockHeight,
-  gasAmount,
-  type Invocation,
-} from "@thruputchain/protocol";
-import { demoSigner } from "./signer.js";
+  connectClient,
+  createPreparer,
+  demoWallet,
+  type Operation,
+  type Wallet,
+} from "./prepare.js";
+import { createPreparePool } from "./prepare-pool.js";
 import {
   receiptResults,
   submissionOutcome,
   rpcBatch,
   type ReceiptPollResult,
 } from "./rpc.js";
-import {
-  networkConfig,
-  networkTransport,
-  type NetworkConfig,
-} from "./network.js";
+import { networkConfig, type NetworkConfig } from "./network.js";
 
-export interface Operation {
-  hash: string;
-  payload: string;
-  sender: number;
-  receiver: number;
-}
+export type { Operation } from "./prepare.js";
 export interface Chain {
   network: string;
   addresses: string[];
@@ -45,23 +29,25 @@ export interface Chain {
   poll(operations: Operation[]): Promise<ReceiptPollResult[]>;
 }
 
-export function thruputChain(config: NetworkConfig = networkConfig()): Chain {
+export function thruputChain(
+  config: NetworkConfig = networkConfig(),
+  options: { prepareWorkers?: number; env?: NodeJS.ProcessEnv } = {},
+): Chain {
   const { rpcUrl, cluster } = config;
-  const connect = () =>
-    createThruputClient({ cluster, transport: networkTransport(rpcUrl) });
+  const connect = () => connectClient(config);
   let clientPromise: ReturnType<typeof connect> | undefined;
-  let transfers: Invocation[] = [];
   async function makeWallet(index: number) {
     const client = await (clientPromise ??= connect().catch((error) => {
       clientPromise = undefined;
       throw error;
     }));
-    return createWalletClient({
-      client,
-      account: createPubkeyAccount({ signer: demoSigner(index), nonce: 0n }),
-    });
+    return demoWallet(client, index);
   }
-  const wallets: Awaited<ReturnType<typeof makeWallet>>[] = [];
+  const wallets: Wallet[] = [];
+  const prepareInline = createPreparer(wallets);
+  const pool = options.prepareWorkers
+    ? createPreparePool(options.prepareWorkers, options.env ?? process.env)
+    : undefined;
   let tip = 0n;
   let tipAt = 0;
   let tipRequest: Promise<void> | undefined;
@@ -104,14 +90,6 @@ export function thruputChain(config: NetworkConfig = networkConfig()): Chain {
     async prepare(count, walletCount) {
       const first = wallets[0];
       if (!first) throw new Error("Wallet pool is not ready");
-      if (transfers.length !== walletCount) {
-        transfers = wallets.slice(0, walletCount).map((_, index) =>
-          ERC20.v0_1.transfer.invocation(HOG_ADDRESS, gasAmount(100_000n), {
-            receiver: wallets[(index + 1) % walletCount]!.account.address,
-            amount: 1n,
-          }),
-        );
-      }
       if (Date.now() - tipAt > 2_000) {
         tipRequest ??= first
           .getChainTip()
@@ -124,29 +102,11 @@ export function thruputChain(config: NetworkConfig = networkConfig()): Chain {
           });
         await tipRequest;
       }
-      const operations: Operation[] = [];
-      for (let i = 0; i < count; i++) {
-        const current = sequence++;
-        const sender = Number(current % BigInt(walletCount));
-        const receiver = (sender + 1) % walletCount;
-        const wallet = wallets[sender]!;
-        const transaction = await wallet.prepareExecution({
-          invocation: transfers[sender]!,
-          gasLimit: gasAmount(500_000n),
-          nonce: (nonceBase + current) & ((1n << 64n) - 1n),
-          // Spread replay-cache buckets even when a low-wallet burst shares a tip.
-          blockExpiryHeight: blockHeight(
-            tip + 200n + ((current / BigInt(walletCount * 4_000)) % 100n),
-          ),
-        });
-        const signed = await wallet.signTransaction(transaction);
-        operations.push({
-          hash: toHex0x(hashSignedTransaction(signed)),
-          payload: toHex0x(serializeSignedTransaction(signed)),
-          sender,
-          receiver,
-        });
-      }
+      const start = sequence;
+      sequence += BigInt(count);
+      const request = { start, count, walletCount, tip, nonceBase };
+      const operations = await (pool?.prepare(request) ??
+        prepareInline(request));
       await setImmediate();
       return operations;
     },
