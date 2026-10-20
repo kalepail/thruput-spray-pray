@@ -57,6 +57,8 @@ function runtime() {
     cpuPercent: Math.round(((cpu.user + cpu.system) / 1000 / wallMs) * 100),
     eventLoopUtilization: Math.round(loop.utilization * 100) / 100,
     intervalMs: Math.round(wallMs),
+    // Lets a host confirm which deployment started this process.
+    launchedBy: process.env.SPRAY_LAUNCHED_BY ?? null,
   };
 }
 const server = createServer(async (req, res) => {
