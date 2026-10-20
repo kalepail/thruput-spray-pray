@@ -53,10 +53,18 @@ Other findings that shaped the code:
   Durable Object calls, so a placed egress Worker did not help.
 - Web Crypto Ed25519 produces byte-identical transactions to the Node signer and signs
   faster in workerd.
-- Each sender's replay-cache entries are spread across expiry heights in buckets of
-  ~4,000 transfers. When one lane signs for one wallet, the bucket size must use that
-  lane's sender count. Otherwise devnet excludes transfers with two-phase-commit storage
-  conflicts (`retry`, executor code 3).
+- A sender's replay cache takes at most 8,000 unexpired nonces per expiry height
+  (`kReplayCacheNoncesMaxLen` in `protocol/storage_item.x`). Upstream's counter-based
+  buckets wrap after about 2 minutes of sustained load and overfill heights, which
+  devnet reports as `retry` (executor code 3, a capacity conflict) that resends cannot
+  fix. `server/expiry.ts` fills one height per sender up to 7,000, moves forward, never
+  reuses a height, and waits for new blocks when its window is full. Lanes persist the
+  cursor, so a restart continues past heights it already filled. Sustained throughput
+  is therefore bounded by about 7,000 transfers per wallet per block.
+- Lanes that share a wallet take alternate expiry heights.
+- Every coordinator call to a lane has a deadline, and browser heartbeats are
+  forwarded without waiting. One WebSocket's messages are handled in order, so a lane
+  call that never returned once held back heartbeats for 7 minutes.
 - The engine asks for the scheduler status of receipts overdue by
   `SPRAY_STATUS_AFTER_MS`. On `retry` or `unknown`, it resends the identical signed
   bytes. The hash does not change, so a resend never creates a second transfer.
@@ -92,6 +100,8 @@ All settings are text bindings in `cloudflare.config.ts`.
 | `SPRAY_POLL_CONCURRENCY`, `_BATCH`      | `8`, `1000`                       | Receipt lookups per lane; RPC arrays take up to 1,000        |
 | `SPRAY_SUBMIT_RETRIES`                  | `2`                               | Resend identical bytes only after a lost connection          |
 | `SPRAY_STATUS_AFTER_MS`                 | `6000`                            | Check scheduler status for receipts this late                |
+| `SPRAY_EXPIRY_AHEAD`, `_WINDOW`         | `30`, `20`                        | First expiry 30 blocks ahead; 20 heights before waiting      |
+| `SPRAY_NONCES_PER_HEIGHT`               | `7000`                            | Per sender per height; the protocol limit is 8,000           |
 
 Engine limits are validated: integers, at least 1 where 0 would stall the engine, and
 a first-poll ratio between 0 and 2. Resends never follow an HTTP status. Devnet answers

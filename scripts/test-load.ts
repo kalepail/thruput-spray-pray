@@ -23,6 +23,8 @@ ws.on("message", (raw) => {
   if (message.type === "error") errors.push(message.message);
 });
 await once(ws, "open");
+// A closed socket stops heartbeats and ends the spray; the run would look short, not failed.
+ws.on("close", (code) => errors.push(`WebSocket closed (${code})`));
 const state = async (): Promise<Snapshot> =>
   (await fetch(`${url}/api/state`)).json() as Promise<Snapshot>;
 async function until(predicate: (snapshot: Snapshot) => boolean) {
@@ -95,5 +97,6 @@ try {
   );
 } finally {
   clearInterval(heartbeat);
+  ws.removeAllListeners("close");
   ws.close();
 }

@@ -25,6 +25,19 @@ const SETUP_RETRY_MS = 5_000;
 
 type Lane = ReturnType<typeof laneStub>;
 
+// A lane call that never settles would otherwise block the caller indefinitely.
+const LANE_CALL_MS = 5_000;
+const LANE_CONFIGURE_MS = 120_000;
+function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return Promise.race([
+    call,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Lane did not answer")), ms);
+    }),
+  ]).finally(() => timer !== null && clearTimeout(timer));
+}
+
 /**
  * The shared experiment: browser WebSockets, the single spray lease, and combined
  * statistics. Transfers run in SprayLane objects placed beside the RPC.
@@ -105,15 +118,18 @@ export class SprayPray extends DurableObject<Env> {
       const lanes = await this.laneStubs();
       const results = await Promise.allSettled(
         lanes.map((stub, index) =>
-          stub.configure(
-            this.version(),
-            {
-              sender: index % WALLET_COUNT,
-              slot: Math.floor(index / WALLET_COUNT),
-              slots: this.laneCount / WALLET_COUNT,
-            },
-            lane,
-            outstanding,
+          deadline(
+            stub.configure(
+              this.version(),
+              {
+                sender: index % WALLET_COUNT,
+                slot: Math.floor(index / WALLET_COUNT),
+                slots: this.laneCount / WALLET_COUNT,
+              },
+              lane,
+              outstanding,
+            ),
+            LANE_CONFIGURE_MS,
           ),
         ),
       );
@@ -150,10 +166,12 @@ export class SprayPray extends DurableObject<Env> {
       const lanes = await this.laneStubs();
       let broken = false;
       const reports = await Promise.all(
-        lanes.map((lane) =>
-          lane.report(this.version()).catch(() => {
+        lanes.map((lane, i) =>
+          deadline(lane.report(this.version()), LANE_CALL_MS).catch(() => {
             broken = true;
-            return null;
+            // Keep the last known totals; null would mean "not configured".
+            const last = this.reports[i];
+            return last ? { ...last, particles: 0, newBlocks: [] } : null;
           }),
         ),
       );
@@ -299,24 +317,29 @@ export class SprayPray extends DurableObject<Env> {
     this.heartbeat = Date.now();
     if (!starting && Date.now() - this.forwardedAt < FORWARD_MS) return;
     this.forwardedAt = Date.now();
-    const lanes = await this.laneStubs();
-    const results = await Promise.allSettled(
-      lanes.map((lane) => lane.spray(this.version(), point)),
+    // Do not await the lanes: WebSocket messages from one browser are handled in
+    // order, so a slow lane would hold back that browser's heartbeats and expire its
+    // lease. Each lane holds its own lease for 1.5 s and hears from us every 250 ms.
+    void this.laneStubs().then((lanes) =>
+      Promise.allSettled(
+        lanes.map((lane) =>
+          deadline(lane.spray(this.version(), point), LANE_CALL_MS),
+        ),
+      ).then((results) => {
+        for (const result of results)
+          if (result.status === "rejected") this.recordError(result.reason);
+      }),
     );
-    // A lane holds its lease for 1.5 s and hears from us every 250 ms, so one lost
-    // heartbeat is harmless. Only a spray no lane accepted is the browser's error.
-    const failed = results.filter((r) => r.status === "rejected");
-    if (failed.length === lanes.length)
-      throw (failed[0] as PromiseRejectedResult).reason;
-    for (const failure of failed)
-      this.recordError((failure as PromiseRejectedResult).reason);
   }
 
   private async stop(id: string): Promise<void> {
     if (this.owner !== id) return;
     this.owner = null;
     const lanes = await this.laneStubs();
-    await Promise.all(lanes.map((lane) => lane.stop().catch(() => {})));
+    // Lanes stop on their own when heartbeats end; this only makes it immediate.
+    await Promise.all(
+      lanes.map((lane) => deadline(lane.stop(), LANE_CALL_MS).catch(() => {})),
+    );
   }
 
   private async reset(): Promise<void> {
@@ -324,12 +347,16 @@ export class SprayPray extends DurableObject<Env> {
     if (state.phase !== "ready")
       throw new Error("Wait for all pending transfers before resetting");
     const lanes = await this.laneStubs();
-    await Promise.all(lanes.map((lane) => lane.reset()));
+    await Promise.all(
+      lanes.map((lane) => deadline(lane.reset(), LANE_CALL_MS)),
+    );
     this.blocks.clear();
     this.errors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.
     this.reports = await Promise.all(
-      lanes.map((lane) => lane.report(this.version()).catch(() => null)),
+      lanes.map((lane) =>
+        deadline(lane.report(this.version()), LANE_CALL_MS).catch(() => null),
+      ),
     );
   }
 
