@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Engine } from "../server/engine.js";
+import { Engine, type EngineLimits } from "../server/engine.js";
 import type { Chain, Operation } from "../server/chain.js";
 
-function fixture(overrides: Partial<Chain> = {}) {
+function fixture(
+  overrides: Partial<Chain> = {},
+  limits: Partial<EngineLimits> = {},
+) {
   let sequence = 0;
   const chain: Chain = {
     network: "test",
@@ -30,6 +33,7 @@ function fixture(overrides: Partial<Chain> = {}) {
     outstanding: 8,
     receiptTimeoutMs: 700,
     leaseMs: 250,
+    ...limits,
   });
   return engine;
 }
@@ -124,6 +128,36 @@ test("lost submit response is polled by original hash, never resubmitted", async
   assert.equal(engine.snapshot().succeeded, 8);
   assert.equal(engine.snapshot().accepted, 0);
   assert.equal(new Set(sent).size, sent.length);
+});
+
+test("opt-in resend repeats identical bytes and ignores duplicate rejection", async (t) => {
+  const sent: string[] = [];
+  const failedOnce = new Set<string>();
+  const engine = fixture(
+    {
+      async submit(ops) {
+        sent.push(...ops.map((o) => o.payload + o.hash));
+        const key = ops[0]!.hash;
+        if (!failedOnce.has(key)) {
+          failedOnce.add(key);
+          throw new Error("fetch failed");
+        }
+        // The first copy was admitted; the gateway rejects the duplicate.
+        return ops.map(() => "rejected");
+      },
+    },
+    { submitRetries: 1 },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().attempted === 8);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  assert.equal(engine.snapshot().succeeded, 8);
+  assert.equal(engine.snapshot().failed, 0);
+  assert.equal(sent.length, 16);
+  assert.equal(new Set(sent).size, 8);
 });
 
 test("receipt deadline is unresolved, lease expiration stops generation", async (t) => {
