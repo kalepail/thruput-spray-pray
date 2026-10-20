@@ -12,6 +12,8 @@ import {
   submissionOutcome,
   rpcBatch,
   fetchPost,
+  statusResults,
+  type TxStatus,
   type ReceiptPollResult,
   type RpcPost,
 } from "./rpc.js";
@@ -29,12 +31,24 @@ export interface Chain {
     operations: Operation[],
   ): Promise<("accepted" | "rejected" | "unknown")[]>;
   poll(operations: Operation[]): Promise<ReceiptPollResult[]>;
+  /** Scheduler status for transfers whose receipts are overdue. */
+  status?(operations: Operation[]): Promise<TxStatus[]>;
 }
 
 export function thruputChain(
   config: NetworkConfig,
-  options: { post?: RpcPost } = {},
+  /** `senders` limits signing and funding to some wallets, for one shard of the ring. */
+  options: {
+    post?: RpcPost;
+    senders?: number[];
+    /** This shard's expiry-height slot when `slots` shards share its senders. */
+    slot?: number;
+    slots?: number;
+    /** Wallet key seed; see demoSigner. */
+    walletSeed?: string;
+  } = {},
 ): Chain {
+  const { senders, slot, slots, walletSeed } = options;
   const { rpcUrl } = config;
   const post = options.post ?? fetchPost(rpcUrl);
   const connect = () => connectClient(config);
@@ -44,7 +58,7 @@ export function thruputChain(
       clientPromise = undefined;
       throw error;
     }));
-    return demoWallet(client, await demoSigner(index));
+    return demoWallet(client, await demoSigner(index, walletSeed));
   }
   const wallets: Wallet[] = [];
   const prepare = createPreparer(wallets);
@@ -65,12 +79,18 @@ export function thruputChain(
           wallets.push(wallet);
           chain.addresses.push(toHex0x(wallet.account.address));
         }
+        // Receivers only need an address; only signing wallets spend storage deposits.
+        if (senders && !senders.includes(i)) continue;
         const balance = await wallet.getBalance();
         if (balance.rawBalance < 10_000_000n) {
           progress(`Funding wallet ${i + 1} of ${count}`);
           const airdrop = await wallet
             .requestAirdrop()
-            .catch((error: unknown) => {
+            .catch(async (error: unknown) => {
+              // Shards that share a sender fund it at the same time; the faucet then
+              // refuses all but one request. Accept the wallet if another one landed.
+              if ((await wallet.getBalance()).rawBalance >= 10_000_000n)
+                return { status: { result: "ok" as const } };
               const reason =
                 error instanceof Error ? error.message : String(error);
               throw new Error(
@@ -108,7 +128,16 @@ export function thruputChain(
       }
       const start = sequence;
       sequence += BigInt(count);
-      const request = { start, count, walletCount, tip, nonceBase: nonceBase! };
+      const request = {
+        start,
+        count,
+        walletCount,
+        tip,
+        nonceBase: nonceBase!,
+        senders,
+        slot,
+        slots,
+      };
       const operations = await prepare(request);
       // Yield so WebSocket input and receipt polling run between batches.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -121,6 +150,15 @@ export function thruputChain(
         operations.map((op) => [op.payload]),
       );
       return rows.map((row, i) => submissionOutcome(operations[i]!.hash, row));
+    },
+    async status(operations) {
+      return statusResults(
+        await rpcBatch(
+          post,
+          "groundhog_getTransactionStatus",
+          operations.map((op) => [op.hash]),
+        ),
+      );
     },
     async poll(operations) {
       const rows = await rpcBatch(

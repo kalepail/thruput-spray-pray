@@ -185,6 +185,10 @@ test("Web Crypto signer is deterministic, keeps the Node-derived keys, and signs
   const signer = await demoSigner(0);
   assert.deepEqual(signer.publicKey, (await demoSigner(0)).publicKey);
   assert.notDeepEqual(signer.publicKey, (await demoSigner(1)).publicKey);
+  assert.notDeepEqual(
+    signer.publicKey,
+    (await demoSigner(0, "spray-and-pray/hosted-worker/v1")).publicKey,
+  );
   assert.ok("ed25519" in signer.publicKey);
   // The original Node signer derived the same seed; funded wallets must not change.
   const seed = createHash("sha256")
@@ -200,7 +204,9 @@ test("Web Crypto signer is deterministic, keeps the Node-derived keys, and signs
   });
   assert.deepEqual(
     Buffer.from(signer.publicKey.ed25519),
-    createPublicKey(nodeKey).export({ format: "der", type: "spki" }).subarray(-32),
+    createPublicKey(nodeKey)
+      .export({ format: "der", type: "spki" })
+      .subarray(-32),
   );
   const message = new TextEncoder().encode("spray");
   const signature = await signer.sign(message);

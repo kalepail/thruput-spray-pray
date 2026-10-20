@@ -26,7 +26,9 @@ export function submissionOutcome(
   return row.result === hash ? "accepted" : "unknown";
 }
 
-export type RpcPost = (body: string) => Promise<{ status: number; text: string }>;
+export type RpcPost = (
+  body: string,
+) => Promise<{ status: number; text: string }>;
 
 export function fetchPost(url: string): RpcPost {
   return async (body) => {
@@ -121,4 +123,25 @@ export function receiptOutcome(
     state: receipt.status.result === "ok" ? "succeeded" : "failed",
     height: receipt.height,
   };
+}
+
+export const TX_STATUSES = [
+  "pending",
+  "committed",
+  "invalid",
+  "recentFailure",
+  "retry",
+  "dropped",
+  "unknown",
+  "other",
+] as const;
+export type TxStatus = (typeof TX_STATUSES)[number] | "unavailable";
+
+/** `groundhog_getTransactionStatus` rows; an error or unexpected shape is unavailable. */
+export function statusResults(rows: RpcResponse[]): TxStatus[] {
+  return rows.map((row) => {
+    if (row.error) return "unavailable";
+    const status = (row.result as { status?: unknown } | null)?.status;
+    return TX_STATUSES.find((known) => known === status) ?? "unavailable";
+  });
 }

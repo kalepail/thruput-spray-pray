@@ -13,10 +13,7 @@ test("Explicit Devnet retains its endpoint and verified signing identity", () =>
   assert.equal(config.rpcUrl, "https://rpc.thruput.network");
   assert.equal(config.name, "Devnet");
   assert.equal(config.cluster.rpcUrl, config.rpcUrl);
-  assert.equal(
-    toHex0x(config.cluster.networkHash!),
-    `0x${HASH}`,
-  );
+  assert.equal(toHex0x(config.cluster.networkHash!), `0x${HASH}`);
   assert.deepEqual(config.cluster.capabilities, ["airdrop"]);
 });
 

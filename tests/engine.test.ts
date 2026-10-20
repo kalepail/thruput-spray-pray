@@ -396,3 +396,48 @@ test("pending submissions are not reserved twice after another batch settles", a
   await waitFor(() => engine.snapshot().phase === "ready");
   assert.equal(engine.snapshot().succeeded, engine.snapshot().attempted);
 });
+
+test("scheduler retry resends identical bytes; dropped transfers fail", async (t) => {
+  const sent: string[] = [];
+  const resent = new Set<string>();
+  const engine = fixture(
+    {
+      async submit(ops) {
+        sent.push(...ops.map((o) => o.payload + o.hash));
+        return ops.map(() => "accepted");
+      },
+      // Even hashes lose a storage conflict until resent; hash "1" is dropped.
+      async poll(ops) {
+        return ops.map((op) =>
+          Number(op.hash) % 2 === 1 || resent.has(op.hash)
+            ? op.hash === "1"
+              ? undefined
+              : { state: "succeeded" as const, height: "10" }
+            : undefined,
+        );
+      },
+      async status(ops) {
+        return ops.map((op) => {
+          if (op.hash === "1") return "dropped";
+          resent.add(op.hash);
+          return "retry";
+        });
+      },
+    },
+    { statusAfterMs: 100, pollIntervalMs: 20, firstPollMs: 20 },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().attempted >= 8);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  const state = engine.snapshot();
+  assert.equal(state.failed, 1);
+  assert.equal(state.unresolved, 0);
+  assert.equal(state.succeeded, state.attempted - 1);
+  assert.equal(state.resubmitted, Math.ceil(state.attempted / 2));
+  // Every resend repeats the exact signed bytes of an earlier submission.
+  const first = new Set(sent.slice(0, state.attempted));
+  for (const copy of sent.slice(state.attempted)) assert.ok(first.has(copy));
+});

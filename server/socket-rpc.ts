@@ -60,7 +60,10 @@ class Connection {
         const colon = line.indexOf(":");
         return [
           line.slice(0, colon).trim().toLowerCase(),
-          line.slice(colon + 1).trim().toLowerCase(),
+          line
+            .slice(colon + 1)
+            .trim()
+            .toLowerCase(),
         ];
       }),
     );

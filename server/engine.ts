@@ -19,11 +19,10 @@ export interface EngineLimits {
   pollIntervalMs: number;
   submitRetries: number;
   probeIntervalMs: number;
+  statusAfterMs: number;
 }
 
-export function engineLimits(
-  env: Record<string, unknown> = {},
-): EngineLimits {
+export function engineLimits(env: Record<string, unknown> = {}): EngineLimits {
   const number = (name: string, fallback: number) => {
     const value = Number(env[name] ?? fallback);
     if (!Number.isFinite(value) || value < 0)
@@ -41,6 +40,8 @@ export function engineLimits(
     pollIntervalMs: number("SPRAY_POLL_INTERVAL_MS", 500),
     submitRetries: number("SPRAY_SUBMIT_RETRIES", 0),
     probeIntervalMs: number("SPRAY_PROBE_INTERVAL_MS", 0),
+    // 0 disables scheduler status checks and resends.
+    statusAfterMs: number("SPRAY_STATUS_AFTER_MS", 0),
   };
 }
 
@@ -63,6 +64,8 @@ interface Pending {
   nextPoll: number;
   ready: boolean;
   group: Group;
+  /** Earliest time to ask the scheduler about a missing receipt. */
+  statusAt: number;
 }
 export class Engine {
   private listeners: Listeners = { state: [], particles: [] };
@@ -84,6 +87,7 @@ export class Engine {
     succeeded: 0,
     failed: 0,
     unresolved: 0,
+    resubmitted: 0,
   };
   private errors: string[] = [];
   private samples: { time: number; sent: number; succeeded: number }[] = [];
@@ -193,6 +197,7 @@ export class Engine {
       succeeded: 0,
       failed: 0,
       unresolved: 0,
+      resubmitted: 0,
     };
     this.samples = [];
     this.errors = [];
@@ -201,6 +206,15 @@ export class Engine {
     this.blockCounts.clear();
     this.receiptTimeMs = 0;
     this.receiptCount = 0;
+  }
+
+  /** Totals for combining several engines' statistics exactly. */
+  totals() {
+    return {
+      receiptTimeMs: this.receiptTimeMs,
+      receiptCount: this.receiptCount,
+      blocks: [...this.successfulBlocks],
+    };
   }
 
   snapshot(): Snapshot {
@@ -300,6 +314,7 @@ export class Engine {
                 : this.firstPollDelay()),
           ready: false,
           group,
+          statusAt: sentAt + this.limits.statusAfterMs,
         });
       }
       this.counts.attempted += operations.length;
@@ -392,8 +407,17 @@ export class Engine {
     } catch (error) {
       this.recordError(error);
     } finally {
+      const overdue: Pending[] = [];
       for (const item of batch) {
         if (!this.pending.has(item.operation.hash)) continue;
+        if (
+          this.limits.statusAfterMs > 0 &&
+          this.chain.status &&
+          Date.now() >= item.statusAt
+        ) {
+          item.statusAt = Infinity;
+          overdue.push(item);
+        }
         if (Date.now() - item.sentAt > this.limits.receiptTimeoutMs) {
           this.settle(item.operation.hash, "unresolved");
           this.recordError("Receipt deadline reached; outcome unresolved");
@@ -406,6 +430,7 @@ export class Engine {
               : this.limits.pollIntervalMs);
         }
       }
+      if (overdue.length) void this.checkStatus(overdue);
       this.polling--;
       this.finishWork();
       // Each slot refills independently; a slow RPC cannot hold the other three idle.
@@ -413,6 +438,37 @@ export class Engine {
         this.poll();
         this.pump();
       }, 0);
+    }
+  }
+
+  /**
+   * Under load the scheduler excludes transfers that lose a two-phase-commit storage
+   * conflict and reports them as `retry`. Resending the identical signed bytes keeps
+   * the same hash, so it can never create a second transfer.
+   */
+  private async checkStatus(items: Pending[]): Promise<void> {
+    try {
+      const statuses = await this.chain.status!(items.map((i) => i.operation));
+      const resend: Pending[] = [];
+      statuses.forEach((status, i) => {
+        const item = items[i]!;
+        if (!this.pending.has(item.operation.hash)) return;
+        if (status === "retry" || status === "unknown") resend.push(item);
+        else if (status === "dropped" || status === "invalid") {
+          this.settle(item.operation.hash, "failed");
+          this.recordError(`Scheduler reported a ${status} transfer`);
+        }
+      });
+      if (resend.length) {
+        // A rejection here may be the duplicate of an admitted copy; polling decides.
+        await this.chain.submit(resend.map((item) => item.operation));
+        this.counts.resubmitted += resend.length;
+      }
+    } catch (error) {
+      this.recordError(error);
+    } finally {
+      for (const item of items)
+        item.statusAt = Date.now() + this.limits.statusAfterMs;
     }
   }
 

@@ -23,6 +23,8 @@ export interface Snapshot {
   succeeded: number;
   failed: number;
   unresolved: number;
+  /** Transfers resent with identical bytes after the scheduler reported a retryable conflict. */
+  resubmitted: number;
   pending: number;
   liveTps: number;
   submitTps: number;
