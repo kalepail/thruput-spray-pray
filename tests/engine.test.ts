@@ -160,6 +160,37 @@ test("opt-in resend repeats identical bytes and ignores duplicate rejection", as
   assert.equal(new Set(sent).size, 8);
 });
 
+test("probe polling checks one transfer per batch, then the rest of its batch", async (t) => {
+  const polls: string[][] = [];
+  const engine = fixture(
+    {
+      async poll(ops) {
+        polls.push(ops.map((o) => o.hash));
+        return ops.map(() => ({ state: "succeeded" as const, height: "10" }));
+      },
+    },
+    { probeIntervalMs: 20, firstPollMs: 10, pollIntervalMs: 5000 },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().attempted === 8);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  assert.equal(engine.snapshot().succeeded, 8);
+  // Batches of four: hashes 0 and 4 are probes. Each transfer is looked up once,
+  // and never before the probe of its own batch.
+  const order = polls.flat();
+  assert.equal(order.length, 8);
+  for (const hash of order) {
+    const probe = String(Math.floor(Number(hash) / 4) * 4);
+    assert.ok(order.indexOf(probe) <= order.indexOf(hash));
+  }
+  assert.deepEqual(engine.snapshot().recentBlocks, [
+    { height: "10", succeeded: 8 },
+  ]);
+});
+
 test("receipt deadline is unresolved, lease expiration stops generation", async (t) => {
   const engine = fixture({
     async poll(ops) {

@@ -18,6 +18,7 @@ export interface EngineLimits {
   firstPollRatio: number;
   pollIntervalMs: number;
   submitRetries: number;
+  probeIntervalMs: number;
 }
 
 export function engineLimits(
@@ -39,6 +40,7 @@ export function engineLimits(
     firstPollRatio: number("SPRAY_FIRST_POLL_RATIO", 0),
     pollIntervalMs: number("SPRAY_POLL_INTERVAL_MS", 500),
     submitRetries: number("SPRAY_SUBMIT_RETRIES", 0),
+    probeIntervalMs: number("SPRAY_PROBE_INTERVAL_MS", 0),
   };
 }
 
@@ -50,11 +52,17 @@ type Listeners = {
   [K in keyof EngineEvents]: ((value: EngineEvents[K]) => void)[];
 };
 
+/** Transfers submitted in one request; they usually commit in the same block. */
+interface Group {
+  probe: string;
+  hashes: string[];
+}
 interface Pending {
   operation: Operation;
   sentAt: number;
   nextPoll: number;
   ready: boolean;
+  group: Group;
 }
 export class Engine {
   private listeners: Listeners = { state: [], particles: [] };
@@ -81,6 +89,7 @@ export class Engine {
   private samples: { time: number; sent: number; succeeded: number }[] = [];
   private elapsed = 0;
   private successfulBlocks = new Set<string>();
+  private blockCounts = new Map<string, number>();
   private receiptTimeMs = 0;
   private receiptCount = 0;
   private workStart: number | null = null;
@@ -189,6 +198,7 @@ export class Engine {
     this.errors = [];
     this.elapsed = 0;
     this.successfulBlocks.clear();
+    this.blockCounts.clear();
     this.receiptTimeMs = 0;
     this.receiptCount = 0;
   }
@@ -209,6 +219,13 @@ export class Engine {
       pending: this.pending.size,
       liveTps: this.samples.reduce((n, s) => n + s.succeeded, 0) / 5,
       submitTps: this.samples.reduce((n, s) => n + s.sent, 0) / 5,
+      sendingTps: this.samples
+        .filter((sample) => now - sample.time < 1000)
+        .reduce((n, s) => n + s.sent, 0),
+      recentBlocks: [...this.blockCounts]
+        .sort(([a], [b]) => (BigInt(a) < BigInt(b) ? -1 : 1))
+        .slice(-5)
+        .map(([height, succeeded]) => ({ height, succeeded })),
       averageTps: elapsedMs ? (this.counts.succeeded * 1000) / elapsedMs : 0,
       averageTxPerBlock: this.successfulBlocks.size
         ? this.counts.succeeded / this.successfulBlocks.size
@@ -262,12 +279,27 @@ export class Engine {
       ) {
         throw new Error("Duplicate prepared transaction hash");
       }
+      const group: Group = {
+        probe: operations[0]!.hash,
+        hashes: operations.map((operation) => operation.hash),
+      };
+      const probing = this.limits.probeIntervalMs > 0;
       for (const operation of operations) {
+        const probe = probing && operation.hash === group.probe;
         this.pending.set(operation.hash, {
           operation,
           sentAt,
-          nextPoll: sentAt + this.firstPollDelay(),
+          // With probing, one transfer per batch is checked often; the rest wait
+          // for it to land, with a later first poll as a fallback.
+          nextPoll:
+            sentAt +
+            (probe
+              ? this.limits.firstPollMs
+              : probing
+                ? this.firstPollDelay() * 1.5
+                : this.firstPollDelay()),
           ready: false,
+          group,
         });
       }
       this.counts.attempted += operations.length;
@@ -366,7 +398,12 @@ export class Engine {
           this.settle(item.operation.hash, "unresolved");
           this.recordError("Receipt deadline reached; outcome unresolved");
         } else {
-          item.nextPoll = Date.now() + this.limits.pollIntervalMs;
+          item.nextPoll =
+            Date.now() +
+            (this.limits.probeIntervalMs > 0 &&
+            item.group.probe === item.operation.hash
+              ? this.limits.probeIntervalMs
+              : this.limits.pollIntervalMs);
         }
       }
       this.polling--;
@@ -403,8 +440,24 @@ export class Engine {
       this.receiptTimeMs += Date.now() - pending.sentAt;
       this.receiptCount++;
     }
+    if (height !== undefined && pending.group.probe === hash) {
+      // The probe landed, so its batch has very likely landed too: poll it now.
+      for (const member of pending.group.hashes) {
+        const item = this.pending.get(member);
+        if (item?.ready) item.nextPoll = 0;
+      }
+    }
     if (outcome === "succeeded") {
-      if (height !== undefined) this.successfulBlocks.add(height);
+      if (height !== undefined) {
+        this.successfulBlocks.add(height);
+        this.blockCounts.set(height, (this.blockCounts.get(height) ?? 0) + 1);
+        if (this.blockCounts.size > 16) {
+          const oldest = [...this.blockCounts.keys()].reduce((a, b) =>
+            BigInt(a) < BigInt(b) ? a : b,
+          );
+          this.blockCounts.delete(oldest);
+        }
+      }
       const last = this.samples.at(-1);
       if (last && Date.now() - last.time < 50) last.succeeded++;
       else this.samples.push({ time: Date.now(), sent: 0, succeeded: 1 });

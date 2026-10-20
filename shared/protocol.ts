@@ -26,6 +26,10 @@ export interface Snapshot {
   pending: number;
   liveTps: number;
   submitTps: number;
+  /** Transfers handed to submission in the last second. */
+  sendingTps: number;
+  /** Successful transfers in the latest five blocks this experiment landed in. */
+  recentBlocks: { height: string; succeeded: number }[];
   averageTps: number;
   averageTxPerBlock: number;
   observedBlocks: number;

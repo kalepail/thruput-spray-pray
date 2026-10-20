@@ -368,22 +368,18 @@ kbd {
 .rate-bars i {
   width: 3px;
   background: #4b533d;
-  height: 6px;
+  height: 4px;
 }
-.rate-bars i:nth-child(2) {
-  height: 11px;
-}
-.rate-bars i:nth-child(3) {
-  height: 18px;
-}
-.rate-bars i:nth-child(4) {
-  height: 14px;
-}
-.rate-bars i:nth-child(5) {
-  height: 24px;
+.rate-bars i {
+  transition: height 160ms ease-out;
 }
 .is-spraying .rate-bars i {
   background: var(--accent);
+}
+.metric-live {
+  font-size: 0.75rem;
+  color: #a3aa96;
+  font-variant-numeric: tabular-nums;
 }
 .metric-note {
   font-size: 0.75rem;

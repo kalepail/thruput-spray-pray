@@ -146,6 +146,20 @@ function update(snapshot: Snapshot): void {
   };
   for (const [id, value] of Object.entries(metrics))
     element(id).textContent = format.format(value);
+  element("sending-tps").textContent = format.format(state.sendingTps);
+  element("in-flight").textContent = format.format(state.pending);
+  const bars = element("block-bars").children;
+  const blocks = state.recentBlocks;
+  const tallest = Math.max(1, ...blocks.map((block) => block.succeeded));
+  for (let i = 0; i < bars.length; i++) {
+    // Oldest on the left, newest on the right; empty slots stay at the floor.
+    const block = blocks[blocks.length - bars.length + i];
+    const bar = bars[i] as HTMLElement;
+    bar.style.height = `${block ? 4 + (20 * block.succeeded) / tallest : 4}px`;
+    bar.title = block
+      ? `Block ${block.height}: ${format.format(block.succeeded)} successful`
+      : "";
+  }
   element("receipt-delay").textContent =
     `${format.format(state.averageReceiptMs)} ms`;
   element("elapsed").textContent =
