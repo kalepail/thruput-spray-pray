@@ -136,7 +136,9 @@ APP_URL=https://thruput-spray-pray-worker.sdf-ecosystem.workers.dev \
 
 `/api/state` also lists each lane's data center and round trip to the RPC, and the
 `build` stamp. `npm run test:security` checks the deployed app without spraying.
-`test:browser` restores the app's starting settings when it finishes.
+`test:browser` restores the app's starting settings when it finishes. `test:lease`
+checks that a second browser is refused and that the lease passes on release and on
+disconnect. `test:load` fails if its WebSocket closes mid-run.
 
 The load and browser tests send real transfers to shared devnet. Agree a window with
 anyone else load-testing devnet first, and keep only one sprayer running.
