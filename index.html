@@ -72,11 +72,21 @@
           <p class="eyebrow">CONFIRMED TX / SEC</p>
           <div class="rate-row">
             <p id="live-tps">0</p>
-            <div class="rate-bars" aria-hidden="true">
+            <div
+              id="block-bars"
+              class="rate-bars"
+              role="img"
+              aria-label="Successful transfers in the latest five blocks"
+              title="Successful transfers in each of the latest five blocks"
+            >
               <i></i><i></i><i></i><i></i><i></i>
             </div>
           </div>
           <p class="metric-note">Observed over the last 5 seconds</p>
+          <p class="metric-live">
+            Sending <span id="sending-tps">0</span>/s ·
+            <span id="in-flight">0</span> awaiting receipts
+          </p>
         </div>
         <div class="hud-right">
           <div class="session-total">
