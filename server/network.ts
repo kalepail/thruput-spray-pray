@@ -18,7 +18,10 @@ export function networkConfig(env: NodeJS.ProcessEnv = process.env) {
           networkHash: networkHash(
             sha256Hash(
               Buffer.from(
-                "abb9cdbc56285d0e71c9845273ca06211fedf7ee2f58c43cfac6060f9402aa0f",
+                (
+                  env.THRUPUT_NETWORK_HASH ??
+                  "abb9cdbc56285d0e71c9845273ca06211fedf7ee2f58c43cfac6060f9402aa0f"
+                ).replace(/^0x/, ""),
                 "hex",
               ),
             ),
