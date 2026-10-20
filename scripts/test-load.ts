@@ -36,23 +36,27 @@ async function until(predicate: (snapshot: Snapshot) => boolean) {
   throw new Error(`Load run timed out: ${JSON.stringify(await state())}`);
 }
 const send = (message: unknown) => ws.send(JSON.stringify(message));
+const target = {
+  batchSize: Number(process.env.LOAD_BATCH ?? defaults.batchSize),
+  concurrency: Number(process.env.LOAD_CONCURRENCY ?? defaults.concurrency),
+};
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 try {
   const current = await until((s) => s.phase === "ready");
   if (
-    current.settings.batchSize !== defaults.batchSize ||
-    current.settings.concurrency !== defaults.concurrency
+    current.settings.batchSize !== target.batchSize ||
+    current.settings.concurrency !== target.concurrency
   ) {
     send({
       type: "configure",
-      settings: defaults,
+      settings: target,
     });
   }
   await until(
     (s) =>
       s.phase === "ready" &&
-      s.settings.batchSize === defaults.batchSize &&
-      s.settings.concurrency === defaults.concurrency,
+      s.settings.batchSize === target.batchSize &&
+      s.settings.concurrency === target.concurrency,
   );
   send({ type: "reset" });
   await until((s) => s.attempted === 0);
