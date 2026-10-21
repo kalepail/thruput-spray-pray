@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { COORDINATOR, SprayPray, VERSION_HEADER } from "./coordinator.js";
+import { VERSION_HEADER } from "./coordinator.js";
+import { coordinatorStub, type Placement } from "./placement.js";
 
 export { SprayPray } from "./coordinator.js";
 export { SprayLane } from "./lane.js";
@@ -15,10 +16,18 @@ function sameOrigin(request: Request): boolean {
   }
 }
 
-function coordinator() {
-  const ns = env.SPRAY_PRAY as DurableObjectNamespace<SprayPray>;
-  // One shared instance: every browser sees the same experiment and statistics.
-  return ns.get(ns.idFromName(COORDINATOR), { locationHint: "wnam" });
+// One shared coordinator: every browser sees the same experiment and statistics.
+// Placement chooses it once; each isolate caches the name.
+let coordinatorName: Promise<string> | undefined;
+async function coordinator() {
+  coordinatorName ??= (env.PLACEMENT as DurableObjectNamespace<Placement>)
+    .getByName("placement")
+    .coordinator()
+    .catch((error: unknown) => {
+      coordinatorName = undefined;
+      throw error;
+    });
+  return coordinatorStub(await coordinatorName);
 }
 
 export default {
@@ -35,10 +44,10 @@ export default {
     const forwarded = new Request(request);
     forwarded.headers.set(VERSION_HEADER, env.VERSION.timestamp);
     try {
-      return await coordinator().fetch(forwarded.clone());
+      return await (await coordinator()).fetch(forwarded.clone());
     } catch {
       // The object reset for a new version; a fresh stub reaches the new instance.
-      return coordinator().fetch(forwarded);
+      return (await coordinator()).fetch(forwarded);
     }
   },
 } satisfies ExportedHandler<Env>;

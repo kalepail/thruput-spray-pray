@@ -10,13 +10,11 @@ import {
 import { commandSchema, settingsSchema } from "../server/commands.js";
 import { engineLimits } from "../server/engine.js";
 import { publicErrorMessage } from "../server/errors.js";
-import { isNewerVersion } from "./host.js";
+import { isNewerVersion, measureHost, type Host } from "./host.js";
 import type { LaneReport } from "./lane.js";
 import { laneStub, type Placement } from "./placement.js";
 
 export const VERSION_HEADER = "x-spray-pray-version";
-/** The one coordinator object every browser and lane talks to. */
-export const COORDINATOR = "spray-pray";
 const LEASE_MS = 1500;
 // Lanes need a heartbeat inside their own lease; browsers send one every 250 ms.
 const FORWARD_MS = 250;
@@ -64,6 +62,7 @@ export class SprayPray extends DurableObject<Env> {
   private cursors: number[] = [];
   /** When each block height with our transfers was first reported by any lane. */
   private seen = new Map<string, number>();
+  private sprayStartedAt = 0;
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -128,6 +127,7 @@ export class SprayPray extends DurableObject<Env> {
             stub.configure(
               this.version(),
               {
+                coordinator: this.ctx.id.name!,
                 sender: index % WALLET_COUNT,
                 slot: Math.floor(index / WALLET_COUNT),
                 slots: this.laneCount / WALLET_COUNT,
@@ -269,7 +269,8 @@ export class SprayPray extends DurableObject<Env> {
     working: boolean,
   ): number | undefined {
     const heights = [...counts.keys()]
-      .filter((height) => this.seen.has(height))
+      // Only blocks from this spray: an older block would stretch the interval.
+      .filter((height) => (this.seen.get(height) ?? 0) >= this.sprayStartedAt)
       .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
     const latest = heights.at(-1);
     if (!latest || Date.now() - this.seen.get(latest)! > 5_000)
@@ -378,6 +379,7 @@ export class SprayPray extends DurableObject<Env> {
         "Another browser is spraying. Try again when it finishes.",
       );
     const starting = this.owner === null;
+    if (starting) this.sprayStartedAt = Date.now();
     this.owner = id;
     this.point = point;
     this.heartbeat = Date.now();
@@ -460,6 +462,7 @@ export class SprayPray extends DurableObject<Env> {
         ...this.snapshot(),
         exportedAt: new Date().toISOString(),
         lanes: await this.hosts(),
+        coordinator: await this.probe().catch(() => null),
         // Deploys are done when every object runs this version; see scripts/deploy.sh.
         build: {
           version: this.env.VERSION.id,
@@ -473,6 +476,17 @@ export class SprayPray extends DurableObject<Env> {
       },
       { headers: { "Cache-Control": "no-store" } },
     );
+  }
+
+  private host?: Promise<Host>;
+  /** Where this object runs; Placement uses it to choose the coordinator. */
+  probe(): Promise<Host> {
+    return (this.host ??= measureHost(this.env.THRUPUT_RPC_URL).catch(
+      (error: unknown) => {
+        this.host = undefined;
+        throw error;
+      },
+    ));
   }
 
   private async hosts() {

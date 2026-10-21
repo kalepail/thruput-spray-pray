@@ -65,6 +65,7 @@ export function thruputChain(
   }
   const wallets: Wallet[] = [];
   const prepare = createPreparer(wallets);
+  let signing: Promise<unknown> = Promise.resolve();
   const expiry = options.expiry
     ? expiryAllocator({ ...options.expiry, slot: slot ?? 0, slots: slots ?? 1 })
     : undefined;
@@ -165,7 +166,12 @@ export function thruputChain(
         slots,
         expiryHeights,
       };
-      const operations = await prepare(request);
+      // Sign one batch at a time. A shard has one thread, so interleaving its
+      // batches only delays every batch until nearly all of them are done; in turn,
+      // the first batch (and its particles) is ready about four times sooner.
+      const signed = signing.then(() => prepare(request));
+      signing = signed.catch(() => {});
+      const operations = await signed;
       // Yield so WebSocket input and receipt polling run between batches.
       await new Promise((resolve) => setTimeout(resolve, 0));
       return operations;

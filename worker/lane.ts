@@ -1,5 +1,5 @@
 import { DurableObject, env } from "cloudflare:workers";
-import { COORDINATOR, type SprayPray } from "./coordinator.js";
+import type { SprayPray } from "./coordinator.js";
 import type { Point, Settings, Snapshot } from "../shared/protocol.js";
 import { thruputChain } from "../server/chain.js";
 import { Engine, engineLimits } from "../server/engine.js";
@@ -12,9 +12,9 @@ import { isNewerVersion, measureHost, type Host } from "./host.js";
 const ORPHAN_MS = 2 * 60_000;
 const OWNER = "coordinator";
 
-function coordinator() {
+function coordinator(name: string) {
   const ns = env.SPRAY_PRAY as DurableObjectNamespace<SprayPray>;
-  return ns.get(ns.idFromName(COORDINATOR));
+  return ns.get(ns.idFromName(name));
 }
 
 function engineNumber(
@@ -52,6 +52,7 @@ export interface LaneReport {
 export class SprayLane extends DurableObject<Env> {
   private engine?: Engine;
   private host?: Promise<Host>;
+  private coordinatorName = "";
   private lastReport = Date.now();
   private orphanTimer?: ReturnType<typeof setInterval>;
 
@@ -72,12 +73,13 @@ export class SprayLane extends DurableObject<Env> {
   /** Starts the engine for this lane's sender if needed, then applies settings and funds it. */
   async configure(
     version: string,
-    lane: { sender: number; slot: number; slots: number },
+    lane: { coordinator: string; sender: number; slot: number; slots: number },
     settings: Settings,
     outstanding: number,
   ): Promise<void> {
     this.checkVersion(version);
     this.lastReport = Date.now();
+    this.coordinatorName = lane.coordinator;
     if (!this.engine) {
       const vars = this.env as unknown as Record<string, unknown>;
       // The socket pool speaks TLS; a local node over plain HTTP uses fetch().
@@ -100,8 +102,12 @@ export class SprayLane extends DurableObject<Env> {
               );
               return height === undefined ? undefined : BigInt(height);
             },
+            // Best effort: a confirmed write would hold every outgoing message,
+            // including particle pushes, until storage replicates it.
             onHeight: (sender, height) =>
-              this.ctx.storage.kv.put(`expiry:${sender}`, height.toString()),
+              void this.ctx.storage.put(`expiry:${sender}`, height.toString(), {
+                allowUnconfirmed: true,
+              }),
           },
           walletSeed:
             (vars.SPRAY_WALLET_SEED as string | undefined) || undefined,
@@ -113,7 +119,7 @@ export class SprayLane extends DurableObject<Env> {
       );
       // Push each submitted batch at once so the trail follows the pointer.
       engine.on("particles", ({ count }) => {
-        void coordinator()
+        void coordinator(this.coordinatorName)
           .particles(count)
           .catch(() => {});
       });

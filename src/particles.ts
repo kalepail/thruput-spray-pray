@@ -9,13 +9,26 @@ const RATE_SECONDS = 2.5;
 const MAX_LAG_SECONDS = 1.2;
 // Once nobody holds the canvas, flush what is left at a fixed fast rate, so the
 // spray ends with the click instead of trailing off.
-const FLUSH_SECONDS = 0.15;
-const MIN_FLUSH_RATE = 20_000;
+const FLUSH_SECONDS = 0.08;
+const MIN_FLUSH_RATE = 40_000;
 // Particles live 1.2-3.6 s (2.4 s on average). Above this rate the pool would recycle
 // live particles, which pop out early; draw fewer particles per transfer instead.
 const POOL_RATE = (capacity / 2.4) * 0.8;
 // Frame budget for building and filling particle paths; slower devices draw fewer.
 const DRAW_BUDGET_MS = 8;
+// A batch reaches the canvas ~200 ms after a click: the round trip plus signing the
+// first batch. While a browser holds, draw predicted particles at the recent rate
+// whenever nothing real is waiting; real arrivals pay them back instead of being
+// drawn twice. Prediction runs at most this far ahead and stops on release.
+const PREDICT_AHEAD_SECONDS = 0.4;
+// Rate to predict before any spray has been observed.
+const FIRST_PREDICT_RATE = 4_000;
+// After release, late arrivals may still pay back predictions for this long.
+const PAYBACK_MS = 1_500;
+// Batches from a click keep arriving for a round trip after release. Draw what lands
+// shortly after release; count the rest without drawing, so the picture ends with
+// the click while every transfer is still represented.
+const RELEASE_GRACE_MS = 80;
 const palette = [
   "#d6fa7c",
   "#87e6a4",
@@ -42,8 +55,13 @@ export class ParticleCanvas {
   private previous: Point | null = null;
   private lastEmission = 0;
   reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  /** True while a browser holds the canvas; smoothing applies only then. */
-  held = false;
+  private holding = false;
+  /** Particles drawn ahead of real submissions, not yet paid back. */
+  private predicted = 0;
+  private predictCarry = 0;
+  private heldRate = 0;
+  private paybackUntil = 0;
+  private releasedAt = 0;
   emitted = 0;
   private queued = 0;
   private arrived = 0;
@@ -55,6 +73,7 @@ export class ParticleCanvas {
   private frameDensity = 1;
   private drawCarry = 0;
   private drawMs = 0;
+  private drawn = 0;
   private frames = 0;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -66,9 +85,31 @@ export class ParticleCanvas {
     this.frame = requestAnimationFrame((time) => this.draw(time));
   }
 
+  /** True while a browser holds the canvas; smoothing and prediction apply then. */
+  get held(): boolean {
+    return this.holding;
+  }
+  set held(value: boolean) {
+    if (this.holding && !value) {
+      if (this.rate > 0) this.heldRate = this.rate;
+      this.releasedAt = performance.now();
+      this.paybackUntil = this.releasedAt + PAYBACK_MS;
+    }
+    this.holding = value;
+  }
+
   /** Queue a submitted batch; draw() releases it as a steady stream at `aim`. */
   enqueue(count: number, point: Point, sequence: number): void {
-    this.queued += count;
+    // Transfers already shown as predictions are represented, not drawn again.
+    const paid = Math.min(this.predicted, count);
+    this.predicted -= paid;
+    if (paid) this.represent(paid);
+    const late =
+      !this.holding &&
+      this.releasedAt > 0 &&
+      performance.now() - this.releasedAt > RELEASE_GRACE_MS;
+    if (late) this.represent(count - paid);
+    else this.queued += count - paid;
     this.arrived += count;
     this.aim = point;
     this.sequence = sequence;
@@ -87,6 +128,7 @@ export class ParticleCanvas {
     this.arrived = 0;
     if (this.queued <= 0) {
       this.carry = 0;
+      this.predict(seconds);
       return;
     }
     const perSecond = this.held
@@ -104,6 +146,30 @@ export class ParticleCanvas {
     const drawn = count * density + this.drawCarry;
     this.drawCarry = drawn - Math.floor(drawn);
     this.emit(Math.floor(drawn), count, this.aim, this.sequence);
+  }
+
+  /** While held with nothing real waiting, draw ahead at the recent rate. */
+  private predict(seconds: number): void {
+    if (!this.holding) {
+      if (performance.now() > this.paybackUntil) this.predicted = 0;
+      this.predictCarry = 0;
+      return;
+    }
+    const rate = Math.max(this.rate, this.heldRate) || FIRST_PREDICT_RATE;
+    const room = rate * PREDICT_AHEAD_SECONDS - this.predicted;
+    const exact = Math.min(room, rate * seconds + this.predictCarry);
+    if (exact < 1) return;
+    const count = Math.floor(exact);
+    this.predictCarry = exact - count;
+    this.predicted += count;
+    const density = Math.min(this.frameDensity, POOL_RATE / rate);
+    this.emit(Math.floor(count * density), 0, this.aim, this.sequence);
+  }
+
+  /** Count transfers as represented without drawing them. */
+  private represent(transfers: number): void {
+    this.emitted += transfers;
+    this.canvas.dataset.emitted = String(this.emitted);
   }
 
   private emit(
@@ -134,8 +200,11 @@ export class ParticleCanvas {
     }
     this.previous = point;
     this.lastEmission = now;
-    this.emitted += transfers;
-    this.canvas.dataset.emitted = String(this.emitted);
+    this.represent(transfers);
+    if (count) {
+      this.drawn += count;
+      this.canvas.dataset.drawn = String(this.drawn);
+    }
   }
 
   clear(): void {
@@ -144,6 +213,7 @@ export class ParticleCanvas {
     this.previous = null;
     this.queued = 0;
     this.carry = 0;
+    this.predicted = 0;
   }
 
   private resize(): void {

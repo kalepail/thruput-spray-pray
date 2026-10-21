@@ -128,11 +128,13 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
 - **SprayPray** holds the browser WebSockets and the spray lease, forwards
   heartbeats to the lanes, draws each submitted batch, and merges the lanes'
   reports into one snapshot.
-- **Placement** chooses the lane objects once. A Durable Object stays where it is
+- **Placement** chooses the coordinator and the lane objects once. A Durable Object stays where it is
   created, and a `wnam` location hint lands anywhere in Western North America.
   Placement keeps the candidates with the shortest round trip to the RPC (devnet
   runs in AWS us-west-2), because batch uploads from distant data centers are an
-  order of magnitude slower.
+  order of magnitude slower. The coordinator relays every heartbeat and particle,
+  so it sits beside the lanes too; a coordinator in Dallas added about 200 ms to
+  every click.
 
 Signing uses Web Crypto Ed25519 behind the SDK's `Signer` interface; its signed
 transactions are byte-identical to the earlier Node signer's. Transaction
@@ -192,18 +194,22 @@ response is checked using the original hash, never replaced with another
 transaction. A timeout is unresolved, not proof of failure. Unresolved outcomes
 stop being polled after the deadline; the chain may still commit them later.
 
-Particles visualize **submission**, not successful commitment. Submitted batches
-arrive in pulses, because devnet confirms in blocks and new batches go out as each
-block frees in-flight capacity. The canvas queues them and releases particles at
-the smoothed submission rate while a browser holds the canvas, so a drag shows a
-continuous stream; the queue never holds more than about 1.2 seconds. On release,
-the rest flushes within about 0.15 seconds, so the spray ends with the click. The spraying browser draws at its own pointer,
-with no network delay. Up to one particle is drawn per attempted transaction. Above
-about 8,000 per second, or when a frame takes more than 8 ms to draw, fewer
-particles are drawn per transaction so live particles never overflow the
-24,000-particle pool. The canvas exposes `data-emitted` (transfers represented),
-`data-draw-ms`, and `data-density` for diagnostics. Counters are authoritative even
-if a slow browser misses a connection or cannot display every particle.
+Particles visualize **submission**, not successful commitment. A batch reaches the
+canvas about 200 ms after a click: the round trip plus signing the first batch. While
+a browser holds the canvas, it therefore draws predicted particles at the recent
+submission rate from the first frame, at most 0.4 seconds ahead; real batches then
+pay those back instead of being drawn twice. Submitted batches arrive in pulses,
+because devnet confirms in blocks, so the canvas queues them and releases particles
+at the smoothed rate (never more than 1.2 seconds behind). On release, prediction
+stops at once; what arrives in the next 80 ms flushes as a short puff, and later
+arrivals are counted without being drawn, so the picture ends with the click.
+
+Up to one particle is drawn per attempted transaction. Above about 8,000 per second,
+or when a frame takes more than 8 ms to draw, fewer particles are drawn per
+transaction so live particles never overflow the 24,000-particle pool. The canvas
+exposes `data-emitted` (transfers represented), `data-drawn`, `data-draw-ms`, and
+`data-density` for diagnostics. Counters are authoritative even if a slow browser
+misses a connection or cannot display every particle.
 
 HOG has no gas fee, but wallet replay-cache storage locks and releases HOG deposits.
 Sender free balances therefore do not change solely by the amount transferred. The
