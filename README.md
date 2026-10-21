@@ -195,8 +195,9 @@ stop being polled after the deadline; the chain may still commit them later.
 Particles visualize **submission**, not successful commitment. Submitted batches
 arrive in pulses, because devnet confirms in blocks and new batches go out as each
 block frees in-flight capacity. The canvas queues them and releases particles at
-the smoothed submission rate, so a drag shows a continuous stream; the queue never
-holds more than about 1.2 seconds. The spraying browser draws at its own pointer,
+the smoothed submission rate while a browser holds the canvas, so a drag shows a
+continuous stream; the queue never holds more than about 1.2 seconds. On release,
+the rest flushes within about 0.15 seconds, so the spray ends with the click. The spraying browser draws at its own pointer,
 with no network delay. Up to one particle is drawn per attempted transaction. Above
 about 8,000 per second, or when a frame takes more than 8 ms to draw, fewer
 particles are drawn per transaction so live particles never overflow the

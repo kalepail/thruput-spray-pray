@@ -46,6 +46,7 @@ function notify(message: string): void {
 function stop(): void {
   if (held) send({ type: "stop" });
   held = false;
+  particles.held = false;
   if (pointerId !== null && canvas.hasPointerCapture(pointerId))
     canvas.releasePointerCapture(pointerId);
   pointerId = null;
@@ -64,6 +65,7 @@ function start(): void {
     return;
   }
   held = true;
+  particles.held = true;
   particles.aimAt(point);
   send({ type: "spray", point });
   lastSent = performance.now();
@@ -148,6 +150,8 @@ requestAnimationFrame(ease);
 
 function update(snapshot: Snapshot): void {
   state = snapshot;
+  // Viewers smooth another browser's spray while it holds the canvas.
+  particles.held = held || (state.owner !== null && state.owner !== clientId);
   const spraying = state.phase === "spraying";
   app.classList.toggle("is-spraying", spraying);
   element("connection-dot").className =

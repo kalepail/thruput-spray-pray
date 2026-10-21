@@ -7,6 +7,10 @@ const capacity = 24_000;
 const RATE_SECONDS = 2.5;
 // Release faster when needed so no more than this much is ever waiting.
 const MAX_LAG_SECONDS = 1.2;
+// Once nobody holds the canvas, flush what is left at a fixed fast rate, so the
+// spray ends with the click instead of trailing off.
+const FLUSH_SECONDS = 0.15;
+const MIN_FLUSH_RATE = 20_000;
 // Particles live 1.2-3.6 s (2.4 s on average). Above this rate the pool would recycle
 // live particles, which pop out early; draw fewer particles per transfer instead.
 const POOL_RATE = (capacity / 2.4) * 0.8;
@@ -38,6 +42,8 @@ export class ParticleCanvas {
   private previous: Point | null = null;
   private lastEmission = 0;
   reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  /** True while a browser holds the canvas; smoothing applies only then. */
+  held = false;
   emitted = 0;
   private queued = 0;
   private arrived = 0;
@@ -83,7 +89,9 @@ export class ParticleCanvas {
       this.carry = 0;
       return;
     }
-    const perSecond = Math.max(this.rate, this.queued / MAX_LAG_SECONDS);
+    const perSecond = this.held
+      ? Math.max(this.rate, this.queued / MAX_LAG_SECONDS)
+      : Math.max(MIN_FLUSH_RATE, this.queued / FLUSH_SECONDS);
     const exact = perSecond * seconds + this.carry;
     const count = Math.min(this.queued, Math.floor(exact));
     this.carry = count < this.queued ? exact - count : 0;
