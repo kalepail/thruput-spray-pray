@@ -1,5 +1,9 @@
 # Spray & Pray
 
+> **Update, October 20, 2026:** the app now runs on Cloudflare Workers and Durable
+> Objects instead of the Node server described below. Goals, controls, and the
+> measurement contract are unchanged. See `README.md` for the current runtime.
+
 Implemented and verified on September 16, 2026. All five workstream stages are
 complete. See `README.md` for operation and `docs/verification.md` for results.
 

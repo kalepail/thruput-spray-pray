@@ -4,13 +4,18 @@ Hold, drag, and send a little chaos through Thruput.
 
 A full-screen particle playground backed by real ERC20 transfers. A Cloudflare
 Worker with Durable Objects signs and submits the transactions; the browser renders
-one particle for each attempt. Transfers circulate between four demo wallets. Open
+a particle stream for them. Transfers circulate between four demo wallets. Open
 the **Control room** to watch confirmed throughput and adjust load tuning.
 
-The same code runs locally (in `workerd`, through Vite) and hosted on Cloudflare.
+**Try it:** https://thruput-spray-pray.sdf-ecosystem.workers.dev (Thruput devnet).
+
+The same code runs hosted on Cloudflare and locally in `workerd` through Vite.
 There is no Node server and no container.
 
-## Run the app locally
+## Run locally for development
+
+The addresses in this section (`127.0.0.1`) are local development defaults: the
+Vite dev server and a local Thruput node. The hosted app never uses them.
 
 Requirements: Node.js 26.11.1+, npm, read access to `@thruputchain/*` on
 GitHub Packages, and a running current Thruput RPC endpoint. Start your local
@@ -55,7 +60,7 @@ The app serves the API, WebSocket, and frontend from one port.
 | ----------------- | ----------------------- | ------------------------------------------------------ |
 | `THRUPUT_NETWORK` | `localnet`              | `devnet` or `localnet`; read when `npm run dev` starts |
 | `THRUPUT_RPC_URL` | `http://127.0.0.1:9545` | RPC override for the selected network                  |
-| `APP_URL`         | `http://127.0.0.1:5177` | Browser/load/security test target                      |
+| `APP_URL`         | `http://127.0.0.1:5177` | Test target: the local dev server unless set           |
 | `CHROMIUM_PATH`   | `/usr/bin/chromium`     | Browser test executable                                |
 
 All other settings are bindings in `cloudflare.config.ts` (see
@@ -87,7 +92,8 @@ node.
 - **Control room:** view transaction and block statistics. Load tuning offers
   1–1,000 transactions per batch and 1–32 concurrent submission requests,
   defaulting to 256 and 32. The wallet pool is fixed at four.
-- **Release:** stop generating transactions. Submitted work continues draining.
+- **Release:** stop generating transactions. The spray ends at the pointer;
+  submitted work keeps draining in the counters.
 - **Export run:** download the current server snapshot as JSON.
 - **Reset stats:** start fresh once the pipeline is idle.
 - **Reduced motion:** keep particles at their emission positions while they fade.
@@ -118,7 +124,7 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
                                      │  lease, WebSockets, merged statistics
                                      ├──every 100 ms──▶ SprayLane × 8
                                      │                    sign · submit · poll
-                                     └──▶ Placement (1 object): picks the lanes
+                                     └──▶ Placement (1 object): picks coordinator and lanes
 ```
 
 - **SprayLane** runs the pipeline in `server/engine.ts` for one sender wallet; two
@@ -126,8 +132,8 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
   measured about 2,200 tx/s with signing and receipt parsing. Eight lanes run in
   parallel, each with its own connections.
 - **SprayPray** holds the browser WebSockets and the spray lease, forwards
-  heartbeats to the lanes, draws each submitted batch, and merges the lanes'
-  reports into one snapshot.
+  heartbeats to the lanes, relays each submitted batch to browsers as particles,
+  and merges the lanes' reports into one snapshot.
 - **Placement** chooses the coordinator and the lane objects once. A Durable Object stays where it is
   created, and a `wnam` location hint lands anywhere in Western North America.
   Placement keeps the candidates with the shortest round trip to the RPC (devnet
@@ -155,7 +161,8 @@ height (`kReplayCacheNoncesMaxLen`). More fail as a two-phase-commit conflict th
 cannot fix that until the height expires. `server/expiry.ts` therefore fills one
 height per sender up to 7,000, moves forward, never reuses a height, and waits for
 new blocks when its window is full. Lanes persist the cursor, so a restart
-continues past heights it already filled. Sustained throughput is bounded by about
+continues past heights it already filled; a cursor beyond the current window (a
+fresh local node or a devnet wipe) is ignored. Sustained throughput is bounded by about
 7,000 transfers per wallet per block. The earlier counter-based buckets overfilled
 heights after about two minutes of continuous load.
 
@@ -241,6 +248,19 @@ The hosted app uses its own wallet seed, so local runs never share its wallets. 
 coordinator stops after 30 idle minutes and lanes stop 2 minutes after their last
 report; statistics reset when objects restart.
 
+### Monitoring
+
+- `GET /api/state`: the merged snapshot plus `lanes` and `coordinator` (data center
+  and round trip to the RPC) and `build` (Worker version and how many lanes run
+  it). `GET /api/export` returns the same snapshot; the Control room's **Export
+  run** downloads it.
+- Placement is chosen once and stored. To choose new objects, for example after
+  the RPC moves, bump `LAYOUT_KEY` or `COORDINATOR_KEY` in `worker/placement.ts`
+  and deploy.
+- Workers Observability is enabled; Placement logs the objects it chooses.
+
+### After a devnet wipe
+
 After a devnet wipe, `/api/state` reports `Network mismatch`. Read the new hash,
 put it in `THRUPUT_NETWORK_HASH` in `cloudflare.config.ts`, and deploy:
 
@@ -289,6 +309,13 @@ While spraying, devnet blocks carry 25,000–41,000 transfers and stretch from
 already saturate devnet. These are observations of this client on a shared
 network, not consensus benchmarks.
 
+Click feel, measured in Chromium against the hosted app: the first particle
+appears in the first frame (about 30 ms; about 300 ms before prediction and
+coordinator placement). A recorded drag that releases and keeps moving shows the
+trail stopping at the release point. A 30-second drag kept a continuous stream
+(11,650–13,970 transfers represented per second) at 1.8–2.8 ms draw cost per
+frame.
+
 ### Local node (September 16, 2026)
 
 The tables below record earlier configurable-wallet versions of the Node app. The
@@ -331,8 +358,10 @@ LOAD_SECONDS=30 LOAD_BATCH=256 LOAD_CONCURRENCY=32 npm run test:load
 ```
 
 Run the live checks sequentially while the demo is otherwise idle, and keep only
-one sprayer per network. Browser, load, lease, and security tests use the network
-of their `APP_URL` app. `test:load` fails if its WebSocket closes mid-run.
+one sprayer per network. Browser, load, lease, and security tests target the local
+dev server unless `APP_URL` names another app, for example
+`APP_URL=https://thruput-spray-pray.sdf-ecosystem.workers.dev npm run test:security`.
+They use that app's network. `test:load` fails if its WebSocket closes mid-run.
 `test:browser` restores the app's starting settings when it finishes. Browser
 screenshots and machine-readable results go to ignored `test-results/`.
 Browser tests use headless Chromium and do not require a wallet extension.
@@ -366,7 +395,7 @@ package and served from the app's origin. The font license is distributed at
 - `worker/index.ts`: Worker entry, static assets, routing to the coordinator.
 - `worker/coordinator.ts`: `SprayPray` — lease, WebSockets, particles, merged statistics.
 - `worker/lane.ts`: `SprayLane` — one engine per sender wallet.
-- `worker/placement.ts`: `Placement` — chooses lanes beside the RPC.
+- `worker/placement.ts`: `Placement` — chooses the coordinator and lanes beside the RPC.
 - `server/engine.ts`: bounded pipeline, probe polling, scheduler retry, and accounting.
 - `server/chain.ts`, `server/prepare.ts`: wallet provisioning, sender shards, signing.
 - `server/expiry.ts`: per-sender expiry heights within replay-cache capacity.
@@ -377,5 +406,6 @@ package and served from the app's origin. The font license is distributed at
 - `server/commands.ts`: runtime validation of browser control messages.
 - `shared/protocol.ts`: settings and telemetry types, with no browser SDK dependency.
 - `src/main.ts`: pointer/keyboard input, settings, and live UI.
-- `src/particles.ts`: bounded Canvas 2D renderer.
-- `SPEC.md`: original specification and workstream.
+- `src/particles.ts`: bounded Canvas 2D renderer, particle stream, and prediction.
+- `scripts/deploy.sh`: devnet deploy that waits for every object to run the new version.
+- `SPEC.md`, `docs/`: original specification and records of the earlier Node app.

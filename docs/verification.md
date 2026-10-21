@@ -1,5 +1,8 @@
 # Verification record
 
+> This record covers the Node server version of September 16, 2026. Current
+> results for the Workers runtime are in `README.md` under **Verified results**.
+
 ## Environment
 
 - Date: September 16, 2026.
