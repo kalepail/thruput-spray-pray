@@ -56,6 +56,8 @@ export class ParticleCanvas {
   private lastEmission = 0;
   reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   private holding = false;
+  /** True while this browser sprays; only then are particles predicted. */
+  local = false;
   /** Particles drawn ahead of real submissions, not yet paid back. */
   private predicted = 0;
   private predictCarry = 0;
@@ -150,7 +152,7 @@ export class ParticleCanvas {
 
   /** While held with nothing real waiting, draw ahead at the recent rate. */
   private predict(seconds: number): void {
-    if (!this.holding) {
+    if (!this.holding || !this.local) {
       if (performance.now() > this.paybackUntil) this.predicted = 0;
       this.predictCarry = 0;
       return;

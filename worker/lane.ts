@@ -53,6 +53,7 @@ export class SprayLane extends DurableObject<Env> {
   private engine?: Engine;
   private host?: Promise<Host>;
   private coordinatorName = "";
+  private stoppedSession = 0;
   private lastReport = Date.now();
   private orphanTimer?: ReturnType<typeof setInterval>;
 
@@ -131,13 +132,20 @@ export class SprayLane extends DurableObject<Env> {
     await this.engine.configure(settings);
   }
 
-  spray(version: string, point: Point): void {
+  /**
+   * Heartbeats and stops travel as separate calls, so a heartbeat can arrive after
+   * the stop it preceded. `session` is the spray's start time: a lane ignores
+   * heartbeats from a session it has already stopped.
+   */
+  spray(version: string, point: Point, session: number): void {
     this.checkVersion(version);
     this.lastReport = Date.now();
+    if (session <= this.stoppedSession) return;
     this.running().spray(OWNER, point);
   }
 
-  stop(): void {
+  stop(session: number): void {
+    this.stoppedSession = Math.max(this.stoppedSession, session);
     this.engine?.stop(OWNER);
   }
 

@@ -47,6 +47,7 @@ function stop(): void {
   if (held) send({ type: "stop" });
   held = false;
   particles.held = false;
+  particles.local = false;
   if (pointerId !== null && canvas.hasPointerCapture(pointerId))
     canvas.releasePointerCapture(pointerId);
   pointerId = null;
@@ -66,6 +67,7 @@ function start(): void {
   }
   held = true;
   particles.held = true;
+  particles.local = true;
   particles.aimAt(point);
   send({ type: "spray", point });
   lastSent = performance.now();
@@ -87,6 +89,12 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 canvas.addEventListener("pointermove", (event) => {
   if (event.pointerId !== pointerId) return;
+  // A move with no button down means the release was missed (for example a lost
+  // pointerup); stop rather than keep spraying.
+  if (event.pointerType === "mouse" && event.buttons === 0) {
+    stop();
+    return;
+  }
   updatePoint(event);
   particles.aimAt(point);
   if (held && performance.now() - lastSent > 32) {

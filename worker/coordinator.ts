@@ -391,7 +391,10 @@ export class SprayPray extends DurableObject<Env> {
     void this.laneStubs().then((lanes) =>
       Promise.allSettled(
         lanes.map((lane) =>
-          deadline(lane.spray(this.version(), point), LANE_CALL_MS),
+          deadline(
+            lane.spray(this.version(), point, this.sprayStartedAt),
+            LANE_CALL_MS,
+          ),
         ),
       ).then((results) => {
         for (const result of results)
@@ -403,10 +406,13 @@ export class SprayPray extends DurableObject<Env> {
   private async stop(id: string): Promise<void> {
     if (this.owner !== id) return;
     this.owner = null;
+    const session = this.sprayStartedAt;
     const lanes = await this.laneStubs();
     // Lanes stop on their own when heartbeats end; this only makes it immediate.
     await Promise.all(
-      lanes.map((lane) => deadline(lane.stop(), LANE_CALL_MS).catch(() => {})),
+      lanes.map((lane) =>
+        deadline(lane.stop(session), LANE_CALL_MS).catch(() => {}),
+      ),
     );
   }
 
