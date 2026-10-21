@@ -5,7 +5,7 @@ import WebSocket from "ws";
 import type { ServerMessage, Snapshot } from "../shared/protocol.js";
 
 // Two browsers share one experiment; only one may spray. Sprays briefly on devnet.
-const url = process.env.APP_URL ?? "http://127.0.0.1:5173";
+const url = process.env.APP_URL ?? "http://127.0.0.1:5177";
 const state = async (): Promise<Snapshot> =>
   (await fetch(`${url}/api/state`)).json() as Promise<Snapshot>;
 async function until(predicate: (s: Snapshot) => boolean, what: string) {

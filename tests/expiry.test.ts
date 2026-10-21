@@ -70,3 +70,19 @@ test("a restarted shard resumes after the last height it used", () => {
   // A stored height below the new floor is simply skipped.
   assert.equal(after.next(0, 100n), 110n);
 });
+
+test("a stored height beyond the window is ignored after a chain reset", () => {
+  const stored = new Map<number, bigint>([[0, 900n]]);
+  const expiry = expiryAllocator({
+    ahead: 30n,
+    window: 20n,
+    perHeight: 2,
+    slot: 0,
+    slots: 1,
+    resume: (sender) => stored.get(sender),
+    onHeight: (sender, height) => stored.set(sender, height),
+  });
+  // A fresh chain at height 5: start at the floor instead of waiting for 900.
+  assert.equal(expiry.next(0, 5n), 35n);
+  assert.equal(stored.get(0), 35n);
+});

@@ -99,9 +99,14 @@ try {
     result.attempted,
     "Release must stop new submissions",
   );
-  assert.equal(
-    Number(await page.locator("#canvas").getAttribute("data-emitted")),
+  // Particles stream out over up to ~1.2 s; every attempt still gets one.
+  await page.waitForFunction(
+    (attempted) =>
+      Number(
+        document.querySelector("#canvas")?.getAttribute("data-emitted"),
+      ) === attempted,
     result.attempted,
+    { timeout: 5000 },
   );
   await page.getByRole("button", { name: "Control room", exact: true }).click();
   await page.screenshot({ path: "test-results/desktop-controls.png" });

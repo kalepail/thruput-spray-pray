@@ -60,6 +60,8 @@ export class SprayPray extends DurableObject<Env> {
   private forwardedAt = 0;
   private sequence = 0;
   private blocks = new Set<string>();
+  /** Per lane, how many of its block heights this object has merged. */
+  private cursors: number[] = [];
   /** When each block height with our transfers was first reported by any lane. */
   private seen = new Map<string, number>();
   private errors: string[] = [];
@@ -171,11 +173,17 @@ export class SprayPray extends DurableObject<Env> {
       let broken = false;
       const reports = await Promise.all(
         lanes.map((lane, i) =>
-          deadline(lane.report(this.version()), LANE_CALL_MS).catch(() => {
+          deadline(
+            lane.report(this.version(), this.cursors[i] ?? 0),
+            LANE_CALL_MS,
+          ).catch(() => {
             broken = true;
-            // Keep the last known totals; null would mean "not configured".
+            // Keep the last known totals; null would mean "not configured". The
+            // cursor stays put, so the next reply resends any heights missed here.
             const last = this.reports[i];
-            return last ? { ...last, newBlocks: [] } : null;
+            return last
+              ? { ...last, blocks: [], blockCount: this.cursors[i] ?? 0 }
+              : null;
           }),
         ),
       );
@@ -193,11 +201,7 @@ export class SprayPray extends DurableObject<Env> {
       )
         void this.configureLanes(this.settings).catch(() => {});
       this.reports = reports;
-      for (const report of reports)
-        for (const height of report?.newBlocks ?? []) {
-          this.blocks.add(height);
-          if (!this.seen.has(height)) this.seen.set(height, Date.now());
-        }
+      reports.forEach((report, i) => this.addBlocks(i, report));
       // Keep only recent heights; the block rate looks at the last few.
       if (this.seen.size > 32)
         for (const height of [...this.seen.keys()].slice(
@@ -227,6 +231,16 @@ export class SprayPray extends DurableObject<Env> {
       if (this.timer !== undefined) clearInterval(this.timer);
       this.timer = undefined;
     }
+  }
+
+  /** Merge a lane's newly reported heights and advance its cursor. */
+  private addBlocks(lane: number, report: LaneReport | null): void {
+    if (!report) return;
+    for (const height of report.blocks) {
+      this.blocks.add(height);
+      if (!this.seen.has(height)) this.seen.set(height, Date.now());
+    }
+    this.cursors[lane] = report.blockCount;
   }
 
   /**
@@ -348,7 +362,9 @@ export class SprayPray extends DurableObject<Env> {
       elapsedMs,
       backpressure: lanes.some((s) => s.backpressure),
       errors: errors.slice(-8),
-      network: lanes[0]?.network ?? "Devnet",
+      network:
+        lanes[0]?.network ??
+        (this.env.THRUPUT_NETWORK === "devnet" ? "Devnet" : "Localnet"),
       addresses: lanes[0]?.addresses ?? [],
     };
   }
@@ -403,12 +419,16 @@ export class SprayPray extends DurableObject<Env> {
     this.blocks.clear();
     this.seen.clear();
     this.errors = [];
+    this.cursors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.
     this.reports = await Promise.all(
       lanes.map((lane) =>
-        deadline(lane.report(this.version()), LANE_CALL_MS).catch(() => null),
+        deadline(lane.report(this.version(), 0), LANE_CALL_MS).catch(
+          () => null,
+        ),
       ),
     );
+    this.reports.forEach((report, i) => this.addBlocks(i, report));
   }
 
   private recordError(error: unknown): string {

@@ -4,7 +4,7 @@ import WebSocket from "ws";
 import { browserOptions } from "./browser-options.js";
 
 // Read-only checks against a deployed app; nothing here sprays transfers.
-const url = new URL(process.env.APP_URL ?? "http://127.0.0.1:5173").origin;
+const url = new URL(process.env.APP_URL ?? "http://127.0.0.1:5177").origin;
 let browser: Browser | undefined;
 let socket: WebSocket | undefined;
 function assertNoRpcUrl(text: string) {
@@ -26,15 +26,23 @@ try {
   const crossOrigin = new WebSocket(`${url.replace(/^http/, "ws")}/live`, {
     headers: { Origin: "https://example.com" },
   });
-  const status = await new Promise<number>((resolve) => {
-    crossOrigin.on("unexpected-response", (_, response) =>
-      resolve(response.statusCode ?? 0),
-    );
-    crossOrigin.on("open", () => resolve(101));
-    crossOrigin.on("error", () => {});
+  // Deployed Workers answer 403. The local Vite server never forwards a refused
+  // upgrade, so no answer within 5 s also counts; the socket must never open.
+  const opened = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 5000);
+    const settle = (value: boolean) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    crossOrigin.on("open", () => settle(true));
+    crossOrigin.on("unexpected-response", (_, response) => {
+      assert.equal(response.statusCode, 403);
+      settle(false);
+    });
+    crossOrigin.on("error", () => settle(false));
   });
   crossOrigin.terminate();
-  assert.equal(status, 403, "A cross-origin WebSocket must be refused");
+  assert.equal(opened, false, "A cross-origin WebSocket must be refused");
 
   socket = new WebSocket(`${url.replace(/^http/, "ws")}/live`);
   const stateMessage = await new Promise<string>((resolve, reject) => {

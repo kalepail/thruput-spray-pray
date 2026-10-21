@@ -34,8 +34,13 @@ export interface LaneReport {
   snapshot: Snapshot;
   receiptTimeMs: number;
   receiptCount: number;
-  /** Heights with successful transfers first seen since the previous report. */
-  newBlocks: string[];
+  /**
+   * Heights with successful transfers, from the index the caller asked for (or from
+   * 0 if this lane has fewer, after a reset). Stateless, so a lost reply is resent.
+   */
+  blocks: string[];
+  /** Total heights this lane has seen; the caller's next index. */
+  blockCount: number;
   /** Worker version this lane runs. */
   version: string;
 }
@@ -47,7 +52,6 @@ export interface LaneReport {
 export class SprayLane extends DurableObject<Env> {
   private engine?: Engine;
   private host?: Promise<Host>;
-  private reportedBlocks = 0;
   private lastReport = Date.now();
   private orphanTimer?: ReturnType<typeof setInterval>;
 
@@ -76,7 +80,10 @@ export class SprayLane extends DurableObject<Env> {
     this.lastReport = Date.now();
     if (!this.engine) {
       const vars = this.env as unknown as Record<string, unknown>;
-      const sockets = Number(vars.SPRAY_RPC_SOCKETS ?? 0);
+      // The socket pool speaks TLS; a local node over plain HTTP uses fetch().
+      const sockets = this.env.THRUPUT_RPC_URL.startsWith("https:")
+        ? Number(vars.SPRAY_RPC_SOCKETS ?? 0)
+        : 0;
       const engine = new Engine(
         thruputChain(networkConfig(this.env), {
           senders: [lane.sender],
@@ -130,26 +137,23 @@ export class SprayLane extends DurableObject<Env> {
 
   reset(): void {
     this.running().reset();
-    this.reportedBlocks = 0;
   }
 
   /** Null until the coordinator configures this lane, including after a reset. */
-  report(version: string): LaneReport | null {
+  report(version: string, since = 0): LaneReport | null {
     this.checkVersion(version);
     this.lastReport = Date.now();
     if (!this.engine) return null;
     const totals = this.engine.totals();
-    // A stats reset clears the engine's block set.
-    if (totals.blocks.length < this.reportedBlocks) this.reportedBlocks = 0;
-    const report = {
+    return {
       snapshot: this.engine.snapshot(),
       receiptTimeMs: totals.receiptTimeMs,
       receiptCount: totals.receiptCount,
-      newBlocks: totals.blocks.slice(this.reportedBlocks),
+      // A stats reset clears the engine's block set; then resend from the start.
+      blocks: totals.blocks.slice(since > totals.blocks.length ? 0 : since),
+      blockCount: totals.blocks.length,
       version: this.env.VERSION.id,
     };
-    this.reportedBlocks = totals.blocks.length;
-    return report;
   }
 
   private running(): Engine {

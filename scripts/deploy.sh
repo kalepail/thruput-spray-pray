@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Deploy, then confirm that the coordinator and every lane run this exact version.
+# Deploy the devnet app, then confirm that the coordinator and every lane run this
+# exact version.
 # Objects with running timers outlive a deploy until a newer caller resets them.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
 profile="${CF_PROFILE:-default}"
+# The workers.dev URL depends on the account; set SPRAY_PRAY_URL for another one.
 url="${SPRAY_PRAY_URL:-https://thruput-spray-pray.sdf-ecosystem.workers.dev}"
 
-output="$(npx cf deploy --profile "$profile" 2>&1 | tee /dev/stderr)"
+output="$(npx cf deploy --mode devnet --profile "$profile" 2>&1 | tee /dev/stderr)"
 expected="$(printf '%s\n' "$output" | sed -n 's/.*Current Version ID: \([0-9a-f-]*\).*/\1/p' | tail -1)"
 if [ -z "$expected" ]; then
   echo "Could not read the deployed version ID." >&2

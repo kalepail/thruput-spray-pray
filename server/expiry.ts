@@ -40,7 +40,13 @@ export function expiryAllocator(options: ExpiryOptions) {
       if (!cursor) {
         // After a restart, the previous instance's last height may still be filling.
         const resumed = options.resume?.(sender);
-        if (resumed !== undefined && resumed + slots > floor)
+        // A stored height past the usable window means the chain was reset (a fresh
+        // local node or a devnet wipe); waiting for it would stall forever.
+        if (
+          resumed !== undefined &&
+          resumed + slots > floor &&
+          resumed <= tip + options.ahead + options.window
+        )
           cursor = { height: resumed, used: options.perHeight };
         else {
           cursor = { height: floor, used: 0 };

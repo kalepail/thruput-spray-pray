@@ -64,6 +64,7 @@ function start(): void {
     return;
   }
   held = true;
+  particles.aimAt(point);
   send({ type: "spray", point });
   lastSent = performance.now();
 }
@@ -85,6 +86,7 @@ canvas.addEventListener("pointerdown", (event) => {
 canvas.addEventListener("pointermove", (event) => {
   if (event.pointerId !== pointerId) return;
   updatePoint(event);
+  particles.aimAt(point);
   if (held && performance.now() - lastSent > 32) {
     send({ type: "spray", point });
     lastSent = performance.now();
@@ -239,7 +241,12 @@ function connect(): void {
         break;
       case "particles":
         app.classList.add("has-sprayed");
-        particles.emit(message.count, message.point, message.sequence);
+        // The spraying browser draws at its own pointer; others follow the server's.
+        particles.enqueue(
+          message.count,
+          held ? point : message.point,
+          message.sequence,
+        );
         break;
       case "error":
         stop();
