@@ -6,9 +6,9 @@ const capacity = 24_000;
 // the smoothed arrival rate instead, so a drag shows a continuous stream.
 const RATE_SECONDS = 2.5;
 // Release faster when needed so no more than this much is ever waiting.
-const MAX_LAG_SECONDS = 1.2;
-// Once nobody holds the canvas, flush what is left at a fixed fast rate, so the
-// spray ends with the click instead of trailing off.
+const MAX_LAG_SECONDS = 0.5;
+// Particles that arrive while nobody has held the canvas yet (a viewer joining
+// mid-spray) flush at a fixed fast rate.
 const FLUSH_SECONDS = 0.08;
 const MIN_FLUSH_RATE = 40_000;
 // Particles live 1.2-3.6 s (2.4 s on average). Above this rate the pool would recycle
@@ -25,10 +25,6 @@ const PREDICT_AHEAD_SECONDS = 0.4;
 const FIRST_PREDICT_RATE = 4_000;
 // After release, late arrivals may still pay back predictions for this long.
 const PAYBACK_MS = 1_500;
-// Batches from a click keep arriving for a round trip after release. Draw what lands
-// shortly after release; count the rest without drawing, so the picture ends with
-// the click while every transfer is still represented.
-const RELEASE_GRACE_MS = 80;
 const palette = [
   "#d6fa7c",
   "#87e6a4",
@@ -96,6 +92,12 @@ export class ParticleCanvas {
       if (this.rate > 0) this.heldRate = this.rate;
       this.releasedAt = performance.now();
       this.paybackUntil = this.releasedAt + PAYBACK_MS;
+      // The spray ends where the click ends. Drawing the waiting queue here made a
+      // large burst at the release point that read as the spray continuing; count it
+      // without drawing, as for batches that arrive after release.
+      this.represent(this.queued);
+      this.queued = 0;
+      this.carry = 0;
     }
     this.holding = value;
   }
@@ -106,10 +108,8 @@ export class ParticleCanvas {
     const paid = Math.min(this.predicted, count);
     this.predicted -= paid;
     if (paid) this.represent(paid);
-    const late =
-      !this.holding &&
-      this.releasedAt > 0 &&
-      performance.now() - this.releasedAt > RELEASE_GRACE_MS;
+    // After a release, batches still arriving from that click are counted only.
+    const late = !this.holding && this.releasedAt > 0;
     if (late) this.represent(count - paid);
     else this.queued += count - paid;
     this.arrived += count;

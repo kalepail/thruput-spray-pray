@@ -200,9 +200,9 @@ a browser holds the canvas, it therefore draws predicted particles at the recent
 submission rate from the first frame, at most 0.4 seconds ahead; real batches then
 pay those back instead of being drawn twice. Submitted batches arrive in pulses,
 because devnet confirms in blocks, so the canvas queues them and releases particles
-at the smoothed rate (never more than 1.2 seconds behind). On release, prediction
-stops at once; what arrives in the next 80 ms flushes as a short puff, and later
-arrivals are counted without being drawn, so the picture ends with the click.
+at the smoothed rate (never more than 0.5 seconds behind). On release, prediction
+stops and anything still queued or arriving later is counted without being drawn,
+so the spray ends where the click ends; particles already in flight fade out.
 
 Up to one particle is drawn per attempted transaction. Above about 8,000 per second,
 or when a frame takes more than 8 ms to draw, fewer particles are drawn per
