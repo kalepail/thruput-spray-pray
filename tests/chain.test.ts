@@ -4,6 +4,9 @@ import { ERC20 } from "@thruputchain/client/contracts";
 import { thruputChain } from "../server/chain.js";
 import { networkConfig } from "../server/network.js";
 
+// 32 zero bytes in base58.
+const ZERO = "1".repeat(32);
+
 test("wallets share validated identity and cached calls still produce unique signed transactions", async (t) => {
   const methods: string[] = [];
   t.mock.method(
@@ -13,17 +16,29 @@ test("wallets share validated identity and cached calls still produce unique sig
       const request = JSON.parse(String(init?.body));
       methods.push(request.method);
       const result =
-        request.method === "groundhog_networkInfo"
-          ? { networkHash: `0x${"00".repeat(32)}` }
-          : request.method === "groundhog_getBalance"
-            ? {
-                address: request.params[0],
-                rawBalance: "100000000",
-                height: "1",
-              }
-            : request.method === "groundhog_chainTip"
-              ? { height: "1", blockHash: `0x${"00".repeat(32)}` }
-              : assert.fail(`Unexpected RPC: ${request.method}`);
+        request.method === "getVersionInfo"
+          ? {
+              wireFormat: "14.1.1",
+              implementation: "test",
+              supportedMethods: [
+                "faucet_requestAirdrop",
+                "getBalance",
+                "getChainTip",
+                "getNetworkInfo",
+                "getVersionInfo",
+              ],
+            }
+          : request.method === "getNetworkInfo"
+            ? { networkHash: ZERO }
+            : request.method === "getBalance"
+              ? {
+                  address: request.params.address,
+                  rawBalance: "100000000",
+                  stateBlockHeight: "1",
+                }
+              : request.method === "getChainTip"
+                ? { blockHeight: "1", blockHash: ZERO }
+                : assert.fail(`Unexpected RPC: ${request.method}`);
       return new Response(
         JSON.stringify({ jsonrpc: "2.0", id: request.id, result }),
       );
@@ -37,7 +52,7 @@ test("wallets share validated identity and cached calls still produce unique sig
     ...(await chain.prepare(16, 4)),
   ];
   assert.equal(
-    methods.filter((method) => method === "groundhog_networkInfo").length,
+    methods.filter((method) => method === "getNetworkInfo").length,
     1,
   );
   assert.equal(invocation.mock.callCount(), 4);

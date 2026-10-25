@@ -1,6 +1,10 @@
-import { devnet, localnet, HttpTransport } from "@thruputchain/client";
-import { networkHash, sha256Hash } from "@thruputchain/protocol";
-import { hexBytes } from "./bytes.js";
+import {
+  devnet,
+  localnet,
+  hashFromBase58,
+  HttpTransport,
+} from "@thruputchain/client";
+import { networkHash } from "@thruputchain/protocol";
 
 export interface NetworkEnv {
   THRUPUT_NETWORK?: string;
@@ -23,9 +27,7 @@ export function networkConfig(env: NetworkEnv) {
     network === "devnet"
       ? devnet({
           rpcUrl,
-          networkHash: networkHash(
-            sha256Hash(hexBytes(env.THRUPUT_NETWORK_HASH!)),
-          ),
+          networkHash: networkHash(hashFromBase58(env.THRUPUT_NETWORK_HASH!)),
         })
       : localnet({ rpcUrl });
   return {

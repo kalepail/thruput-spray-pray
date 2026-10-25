@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { createThruputClient } from "@thruputchain/client";
-import { contractAddress } from "@thruputchain/protocol";
+import { addressFromBase58, createThruputClient } from "@thruputchain/client";
 import { setTimeout as sleep } from "node:timers/promises";
 import { thruputChain } from "../server/chain.js";
 import { networkConfig, networkTransport } from "../server/network.js";
@@ -12,13 +11,11 @@ const client = await createThruputClient({
   cluster: config.cluster,
   transport: networkTransport(config.rpcUrl),
 });
-const addresses = chain.addresses.map((address) =>
-  contractAddress(Buffer.from(address.slice(2), "hex")),
-);
+const addresses = chain.addresses.map(addressFromBase58);
 const balances = () =>
   Promise.all(
     addresses.map(
-      async (address) => (await client.getBalance(address)).rawBalance,
+      async (address) => (await client.getBalance({ address })).rawBalance,
     ),
   );
 const before = await balances();

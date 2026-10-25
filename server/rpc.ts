@@ -1,12 +1,15 @@
 import { z } from "zod";
-import { ThruputRpcErrorCode } from "@thruputchain/client";
+import { NativeRpcErrorCode } from "@thruputchain/client";
 
 const responseSchema = z
   .object({
     jsonrpc: z.literal("2.0"),
     id: z.number().int(),
     result: z.unknown().optional(),
-    error: z.object({ code: z.number(), message: z.string() }).optional(),
+    error: z
+      .object({ code: z.number(), message: z.string(), data: z.unknown() })
+      .partial({ data: true })
+      .optional(),
   })
   .refine(
     (row) => Object.hasOwn(row, "result") !== Object.hasOwn(row, "error"),
@@ -19,11 +22,17 @@ export function submissionOutcome(
   row: RpcResponse,
 ): "accepted" | "rejected" | "unknown" {
   if (row.error)
-    return row.error.code === ThruputRpcErrorCode.TxInvalid ||
-      row.error.code === ThruputRpcErrorCode.TxRejected
+    return row.error.code === NativeRpcErrorCode.TransactionInvalid ||
+      row.error.code === NativeRpcErrorCode.TransactionRejected
       ? "rejected"
       : "unknown";
-  return row.result === hash ? "accepted" : "unknown";
+  const result = row.result as {
+    transactionHash?: unknown;
+    admission?: unknown;
+  } | null;
+  return result?.transactionHash === hash && result.admission === "accepted"
+    ? "accepted"
+    : "unknown";
 }
 
 export type RpcPost = (
@@ -45,7 +54,7 @@ export function fetchPost(url: string): RpcPost {
 export async function rpcBatch(
   url: string | RpcPost,
   method: string,
-  params: unknown[][],
+  params: object[],
 ): Promise<RpcResponse[]> {
   const post = typeof url === "string" ? fetchPost(url) : url;
   const response = await post(
@@ -68,19 +77,19 @@ export async function rpcBatch(
 }
 
 const receiptSchema = z.object({
-  txHash: z.string(),
-  height: z
+  transactionHash: z.string(),
+  blockHeight: z
     .string()
     .regex(/^(0|[1-9]\d*)$/)
     .refine(
       (height) => BigInt(height) <= (1n << 63n) - 1n,
       "Receipt height exceeds int64",
     ),
-  status: z.object({
+  execution: z.object({
     result: z.enum([
-      "ok",
-      "reverted",
-      "deterministicError",
+      "return",
+      "abort",
+      "fault",
       "nonDeterministicError",
       "failedGasSponsorship",
       "other",
@@ -114,22 +123,20 @@ export function receiptOutcome(
   hash: string,
   response: RpcResponse,
 ): ReceiptOutcome | undefined {
-  if (response.error?.code === ThruputRpcErrorCode.TxNotFound) return;
   if (response.error) throw new Error(`Receipt RPC: ${response.error.message}`);
   if (response.result === null) return;
   const receipt = receiptSchema.parse(response.result);
-  if (receipt.txHash !== hash) throw new Error("Receipt hash mismatch");
+  if (receipt.transactionHash !== hash)
+    throw new Error("Receipt hash mismatch");
   return {
-    state: receipt.status.result === "ok" ? "succeeded" : "failed",
-    height: receipt.height,
+    state: receipt.execution.result === "return" ? "succeeded" : "failed",
+    height: receipt.blockHeight,
   };
 }
 
 export const TX_STATUSES = [
   "pending",
   "committed",
-  "invalid",
-  "recentFailure",
   "retry",
   "dropped",
   "unknown",
@@ -137,7 +144,7 @@ export const TX_STATUSES = [
 ] as const;
 export type TxStatus = (typeof TX_STATUSES)[number] | "unavailable";
 
-/** `groundhog_getTransactionStatus` rows; an error or unexpected shape is unavailable. */
+/** `getTransactionStatus` rows; an error or unexpected shape is unavailable. */
 export function statusResults(rows: RpcResponse[]): TxStatus[] {
   return rows.map((row) => {
     if (row.error) return "unavailable";

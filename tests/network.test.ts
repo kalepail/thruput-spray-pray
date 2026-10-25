@@ -1,19 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toHex0x } from "@thruputchain/client";
+import { toBase58 } from "@thruputchain/client";
 import { networkConfig, networkTransport } from "../server/network.js";
 
-const HASH = "b69ec9c688b3936b5bcbfc4eebc355d39aa9e5c6f6f072cc4a05564a07435047";
+const HASH = "6RgqYi69r94rCG1qKZ5NfCMAxonNAMXbDsFZMgGwgP2J";
 
 test("Explicit Devnet retains its endpoint and verified signing identity", () => {
   const config = networkConfig({
     THRUPUT_NETWORK: "devnet",
-    THRUPUT_NETWORK_HASH: `0x${HASH}`,
+    THRUPUT_NETWORK_HASH: HASH,
   });
   assert.equal(config.rpcUrl, "https://rpc.thruput.network");
   assert.equal(config.name, "Devnet");
   assert.equal(config.cluster.rpcUrl, config.rpcUrl);
-  assert.equal(toHex0x(config.cluster.networkHash!), `0x${HASH}`);
+  assert.equal(toBase58(config.cluster.networkHash!), HASH);
   assert.deepEqual(config.cluster.capabilities, ["airdrop"]);
 });
 
@@ -28,7 +28,7 @@ test("Localnet is the default and retains its zero network identity", () => {
   const config = networkConfig({});
   assert.equal(config.name, "Localnet");
   assert.equal(config.rpcUrl, "http://127.0.0.1:9545");
-  assert.equal(toHex0x(config.cluster.networkHash!), `0x${"00".repeat(32)}`);
+  assert.equal(toBase58(config.cluster.networkHash!), "1".repeat(32));
 });
 
 test("RPC overrides retain the selected network pin", () => {
@@ -63,7 +63,7 @@ test("SDK transport resolves fetch at request time", async (t) => {
         id: number;
         method: string;
       };
-      assert.equal(request.method, "groundhog_chainTip");
+      assert.equal(request.method, "getChainTip");
       return new Response(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -73,7 +73,7 @@ test("SDK transport resolves fetch at request time", async (t) => {
       );
     },
   );
-  assert.deepEqual(await transport.request("groundhog_chainTip"), {
+  assert.deepEqual(await transport.request("getChainTip"), {
     height: 123,
   });
   assert.equal(calls, 1);

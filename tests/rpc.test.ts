@@ -6,7 +6,7 @@ import {
   submissionOutcome,
   rpcBatch,
 } from "../server/rpc.js";
-import { ThruputRpcErrorCode } from "@thruputchain/client";
+import { NativeRpcErrorCode } from "@thruputchain/client";
 import { commandSchema } from "../server/commands.js";
 import { demoSigner } from "../server/signer.js";
 import {
@@ -16,11 +16,23 @@ import {
   verify,
 } from "node:crypto";
 
+const receipt = (
+  transactionHash: string,
+  blockHeight: string,
+  result: string,
+) => ({
+  transactionHash,
+  blockHeight,
+  execution: { result, returnData: "0x" },
+  events: [],
+  gasUsed: "1",
+});
+
 test("only authoritative admission errors discard a signed hash", () => {
   const row = { jsonrpc: "2.0" as const, id: 0 };
   for (const code of [
-    ThruputRpcErrorCode.TxInvalid,
-    ThruputRpcErrorCode.TxRejected,
+    NativeRpcErrorCode.TransactionInvalid,
+    NativeRpcErrorCode.TransactionRejected,
   ])
     assert.equal(
       submissionOutcome("hash", {
@@ -30,8 +42,8 @@ test("only authoritative admission errors discard a signed hash", () => {
       "rejected",
     );
   for (const code of [
-    ThruputRpcErrorCode.BackendTimeout,
-    ThruputRpcErrorCode.Overloaded,
+    NativeRpcErrorCode.BackendTimeout,
+    NativeRpcErrorCode.Overloaded,
     -32603,
   ])
     assert.equal(
@@ -42,11 +54,24 @@ test("only authoritative admission errors discard a signed hash", () => {
       "unknown",
     );
   assert.equal(
-    submissionOutcome("hash", { ...row, result: "hash" }),
+    submissionOutcome("hash", {
+      ...row,
+      result: { transactionHash: "hash", admission: "accepted" },
+    }),
     "accepted",
   );
   assert.equal(
-    submissionOutcome("hash", { ...row, result: "different" }),
+    submissionOutcome("hash", {
+      ...row,
+      result: { transactionHash: "different", admission: "accepted" },
+    }),
+    "unknown",
+  );
+  assert.equal(
+    submissionOutcome("hash", {
+      ...row,
+      result: { transactionHash: "hash", admission: "other" },
+    }),
     "unknown",
   );
 });
@@ -58,22 +83,16 @@ test("mixed receipt batches retain valid peers and defer not-found receipts", ()
     [
       {
         ...row,
-        result: { txHash: "a", height: "12", status: { result: "ok" } },
+        result: receipt("a", "12", "return"),
+      },
+      { ...row, result: null },
+      {
+        ...row,
+        result: receipt("wrong", "12", "return"),
       },
       {
         ...row,
-        error: {
-          code: ThruputRpcErrorCode.TxNotFound,
-          message: "Not yet indexed",
-        },
-      },
-      {
-        ...row,
-        result: { txHash: "wrong", height: "12", status: { result: "ok" } },
-      },
-      {
-        ...row,
-        result: { txHash: "d", height: "13", status: { result: "reverted" } },
+        result: receipt("d", "13", "abort"),
       },
     ],
   );
@@ -98,7 +117,7 @@ test("batch envelopes require exactly one result or error", async (t) => {
   ]) {
     reply = [{ jsonrpc: "2.0", id: 0, ...fields }];
     await assert.rejects(
-      rpcBatch("http://localhost", "method", [[]]),
+      rpcBatch("http://localhost", "method", [{}]),
       /exactly one/,
     );
   }
@@ -107,7 +126,7 @@ test("batch envelopes require exactly one result or error", async (t) => {
     { jsonrpc: "2.0", id: 0, result: "a" },
   ];
   assert.deepEqual(
-    (await rpcBatch("http://localhost", "method", [[], []])).map(
+    (await rpcBatch("http://localhost", "method", [{}, {}])).map(
       (r) => r.result,
     ),
     ["a", "b"],
@@ -118,7 +137,7 @@ test("receipts validate identity and execution, not just presence", () => {
   const response = {
     jsonrpc: "2.0" as const,
     id: 0,
-    result: { txHash: "a", height: "2", status: { result: "ok" } },
+    result: receipt("a", "2", "return"),
   };
   assert.deepEqual(receiptOutcome("a", response), {
     state: "succeeded",
@@ -130,7 +149,7 @@ test("receipts validate identity and execution, not just presence", () => {
   assert.deepEqual(
     receiptOutcome("a", {
       ...response,
-      result: { ...response.result, height: "9007199254740993" },
+      result: { ...response.result, blockHeight: "9007199254740993" },
     }),
     { state: "succeeded", height: "9007199254740993" },
   );
@@ -147,7 +166,7 @@ test("receipts validate identity and execution, not just presence", () => {
     assert.throws(() =>
       receiptOutcome("a", {
         ...response,
-        result: { ...response.result, height },
+        result: { ...response.result, blockHeight: height },
       }),
     );
   }

@@ -14,7 +14,7 @@ export async function measureHost(rpcUrl: string): Promise<Host> {
     const response = await fetch(rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: '{"jsonrpc":"2.0","id":1,"method":"groundhog_networkInfo","params":[]}',
+      body: '{"jsonrpc":"2.0","id":1,"method":"getNetworkInfo","params":{}}',
     });
     await response.arrayBuffer();
     samples.push(Date.now() - start);

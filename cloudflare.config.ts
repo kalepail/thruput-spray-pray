@@ -50,9 +50,9 @@ export default defineConfig(({ mode }) => {
           shell.THRUPUT_RPC_URL ??
             (devnet ? "https://rpc.thruput.network" : "http://127.0.0.1:9545"),
         ),
-        // Devnet identity read from groundhog_networkInfo; update after a devnet wipe.
+        // Devnet identity read from getNetworkInfo; update after a devnet wipe.
         THRUPUT_NETWORK_HASH: bindings.text(
-          "b69ec9c688b3936b5bcbfc4eebc355d39aa9e5c6f6f072cc4a05564a07435047",
+          "6RgqYi69r94rCG1qKZ5NfCMAxonNAMXbDsFZMgGwgP2J",
         ),
         // Lanes per run; a multiple of the four wallets. Each lane uses one core.
         SPRAY_LANES: bindings.text("8"),

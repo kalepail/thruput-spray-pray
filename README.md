@@ -145,7 +145,7 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
 Signing uses Web Crypto Ed25519 behind the SDK's `Signer` interface; its signed
 transactions are byte-identical to the earlier Node signer's. Transaction
 construction, wallet wrapping, serialization, and canonical hashing come from
-`@thruputchain/client@0.18.0`. The browser receives only input/control messages,
+`@thruputchain/client@0.24.0` (wire format 14). The browser receives only input/control messages,
 counters, public addresses, and compact particle batches.
 
 The pipeline signs fresh batches, submits bounded JSON-RPC arrays, and polls
@@ -157,7 +157,7 @@ per batch is polled often; the rest of the batch is polled once it lands.
 
 Each sender's replay cache accepts at most 8,000 unexpired nonces per expiry
 height (`kReplayCacheNoncesMaxLen`). More fail as a two-phase-commit conflict that
-`groundhog_getTransactionStatus` reports as `retry` (executor code 3). Resending
+`getTransactionStatus` reports as `retry` (executor code 3). Resending
 cannot fix that until the height expires. `server/expiry.ts` therefore fills one
 height per sender up to 7,000, moves forward, never reuses a height, and waits for
 new blocks when its window is full. Lanes persist the cursor, so a restart
@@ -166,7 +166,7 @@ fresh local node or a devnet wipe) is ignored. Sustained throughput is bounded b
 7,000 transfers per wallet per block. The earlier counter-based buckets overfilled
 heights after about two minutes of continuous load.
 
-Receipts that stay missing are checked with `groundhog_getTransactionStatus`. On
+Receipts that stay missing are checked with `getTransactionStatus`. On
 `retry` or `unknown` the lane resends the identical signed bytes, which keeps the
 same hash and can never create a second transfer. Network failures are resent the
 same way; HTTP errors are not. Devnet answers a duplicate of an admitted transfer
@@ -261,12 +261,12 @@ report; statistics reset when objects restart.
 
 ### After a devnet wipe
 
-After a devnet wipe, `/api/state` reports `Network mismatch`. Read the new hash,
+After a devnet wipe, `/api/state` reports `Network mismatch`. Read the new base58 hash,
 put it in `THRUPUT_NETWORK_HASH` in `cloudflare.config.ts`, and deploy:
 
 ```sh
 curl -s -X POST https://rpc.thruput.network -H 'content-type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"groundhog_networkInfo","params":[]}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"getNetworkInfo","params":{}}'
 ```
 
 ### Tuning

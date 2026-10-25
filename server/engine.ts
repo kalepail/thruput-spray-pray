@@ -484,7 +484,7 @@ export class Engine {
         const item = items[i]!;
         if (!this.pending.has(item.operation.hash)) return;
         if (status === "retry" || status === "unknown") resend.push(item);
-        else if (status === "dropped" || status === "invalid") {
+        else if (status === "dropped") {
           this.settle(item.operation.hash, "failed");
           this.recordError(`Scheduler reported a ${status} transfer`);
         }

@@ -4,11 +4,12 @@ import {
   createWalletClient,
   hashSignedTransaction,
   serializeSignedTransaction,
+  toBase58,
   toHex0x,
 } from "@thruputchain/client";
 import { ERC20 } from "@thruputchain/client/contracts";
 import {
-  HOG_ADDRESS,
+  NATIVE_TOKEN_ADDRESS,
   blockHeight,
   gasAmount,
   type Invocation,
@@ -67,10 +68,14 @@ export function createPreparer(wallets: Wallet[]) {
       throw new Error("Wallet pool is not ready");
     if (transfers.length !== walletCount) {
       transfers = wallets.slice(0, walletCount).map((_, index) =>
-        ERC20.v0_1.transfer.invocation(HOG_ADDRESS, gasAmount(100_000n), {
-          receiver: wallets[(index + 1) % walletCount]!.account.address,
-          amount: 1n,
-        }),
+        ERC20.v0_1.transfer.invocation(
+          NATIVE_TOKEN_ADDRESS,
+          gasAmount(100_000n),
+          {
+            receiver: wallets[(index + 1) % walletCount]!.account.address,
+            amount: 1n,
+          },
+        ),
       );
     }
     const operations: Operation[] = [];
@@ -100,7 +105,7 @@ export function createPreparer(wallets: Wallet[]) {
       });
       const signed = await wallet.signTransaction(transaction);
       operations.push({
-        hash: toHex0x(hashSignedTransaction(signed)),
+        hash: toBase58(hashSignedTransaction(signed)),
         payload: toHex0x(serializeSignedTransaction(signed)),
         sender,
         receiver,

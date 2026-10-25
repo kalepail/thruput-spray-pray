@@ -1,4 +1,4 @@
-import { toHex0x } from "@thruputchain/client";
+import { toBase58 } from "@thruputchain/client";
 import {
   connectClient,
   createPreparer,
@@ -73,7 +73,7 @@ export function thruputChain(
     (tipRequest ??= first
       .getChainTip()
       .then((value) => {
-        tip = value.height;
+        tip = value.blockHeight;
         tipAt = Date.now();
       })
       .finally(() => {
@@ -94,33 +94,26 @@ export function thruputChain(
         if (!wallet) {
           wallet = await makeWallet(i);
           wallets.push(wallet);
-          chain.addresses.push(toHex0x(wallet.account.address));
+          chain.addresses.push(toBase58(wallet.account.address));
         }
         // Receivers only need an address; only signing wallets spend storage deposits.
         if (senders && !senders.includes(i)) continue;
         const balance = await wallet.getBalance();
         if (balance.rawBalance < 10_000_000n) {
           progress(`Funding wallet ${i + 1} of ${count}`);
-          const airdrop = await wallet
-            .requestAirdrop()
-            .catch(async (error: unknown) => {
-              // Shards that share a sender fund it at the same time; the faucet then
-              // refuses all but one request. Accept the wallet if another one landed.
-              if ((await wallet.getBalance()).rawBalance >= 10_000_000n)
-                return { status: { result: "ok" as const } };
-              const reason =
-                error instanceof Error ? error.message : String(error);
-              throw new Error(
-                `${config.name} funding for wallet ${i + 1} (${toHex0x(wallet.account.address)}) could not finish: ${reason}. Check the faucet cooldown, then retry Apply configuration.`,
-                { cause: error },
-              );
-            });
-          if (airdrop.status.result !== "ok")
+          await wallet.requestAirdrop().catch(async (error: unknown) => {
+            // Shards that share a sender fund it at the same time; the faucet then
+            // refuses all but one request. Accept the wallet if another one landed.
+            if ((await wallet.getBalance()).rawBalance >= 10_000_000n) return;
+            const reason =
+              error instanceof Error ? error.message : String(error);
             throw new Error(
-              `Wallet ${i + 1} funding failed: ${airdrop.status.result}`,
+              `${config.name} funding for wallet ${i + 1} (${toBase58(wallet.account.address)}) could not finish: ${reason}. Check the faucet cooldown, then retry Apply configuration.`,
+              { cause: error },
             );
+          });
           if ((await wallet.getBalance()).rawBalance < 10_000_000n)
-            throw new Error(`Wallet ${i + 1} needs at least 1 test HOG`);
+            throw new Error(`Wallet ${i + 1} needs at least 1 test token`);
         }
       }
     },
@@ -179,8 +172,8 @@ export function thruputChain(
     async submit(operations) {
       const rows = await rpcBatch(
         post,
-        "groundhog_sendRawTransaction",
-        operations.map((op) => [op.payload]),
+        "sendTransaction",
+        operations.map((op) => ({ signedTransaction: op.payload })),
       );
       return rows.map((row, i) => submissionOutcome(operations[i]!.hash, row));
     },
@@ -188,16 +181,16 @@ export function thruputChain(
       return statusResults(
         await rpcBatch(
           post,
-          "groundhog_getTransactionStatus",
-          operations.map((op) => [op.hash]),
+          "getTransactionStatus",
+          operations.map((op) => ({ transactionHash: op.hash })),
         ),
       );
     },
     async poll(operations) {
       const rows = await rpcBatch(
         post,
-        "groundhog_getTransactionReceipt",
-        operations.map((op) => [op.hash]),
+        "getTransactionReceipt",
+        operations.map((op) => ({ transactionHash: op.hash })),
       );
       return receiptResults(
         operations.map((op) => op.hash),
