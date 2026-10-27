@@ -52,7 +52,7 @@ export default defineConfig(({ mode }) => {
         ),
         // Devnet identity read from getNetworkInfo; update after a devnet wipe.
         THRUPUT_NETWORK_HASH: bindings.text(
-          "6RgqYi69r94rCG1qKZ5NfCMAxonNAMXbDsFZMgGwgP2J",
+          "DFizVugYrvktaiKivvCx2P1ApArLuyYmH6vN3HN7FcNT",
         ),
         // Lanes per run; a multiple of the four wallets. Each lane uses one core.
         SPRAY_LANES: bindings.text("8"),
