@@ -1,7 +1,6 @@
 import { DurableObject, env } from "cloudflare:workers";
 import {
   defaults,
-  WALLET_COUNT,
   type Point,
   type ServerMessage,
   type Settings,
@@ -45,7 +44,8 @@ function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
 export class SprayPray extends DurableObject<Env> {
   private settings: Settings = { ...defaults };
   // Each lane signs on its own core with its own connections; lanes split the wallets.
-  private laneCount = WALLET_COUNT;
+  private laneCount = 0;
+  private wallets = 0;
   private outstanding = 0;
   private lanes?: Promise<Lane[]>;
   private reports: (LaneReport | null)[] = [];
@@ -76,14 +76,16 @@ export class SprayPray extends DurableObject<Env> {
       batchSize: Number(vars.SPRAY_BATCH_SIZE ?? defaults.batchSize),
       concurrency: Number(vars.SPRAY_CONCURRENCY ?? defaults.concurrency),
     });
-    this.outstanding = engineLimits(vars).outstanding;
-    this.laneCount = Number(vars.SPRAY_LANES ?? WALLET_COUNT);
+    const limits = engineLimits(vars);
+    this.outstanding = limits.outstanding;
+    this.wallets = limits.wallets;
+    this.laneCount = Number(vars.SPRAY_LANES ?? this.wallets);
     if (
       !Number.isInteger(this.laneCount) ||
-      this.laneCount < WALLET_COUNT ||
-      this.laneCount % WALLET_COUNT
+      this.laneCount < this.wallets ||
+      this.laneCount % this.wallets
     )
-      throw new Error(`SPRAY_LANES must be a multiple of ${WALLET_COUNT}`);
+      throw new Error(`SPRAY_LANES must be a multiple of ${this.wallets}`);
     this.lastActive = Date.now();
     this.timer = setInterval(() => void this.tick(), 100);
     void this.configureLanes(this.settings).catch(() => {});
@@ -128,9 +130,9 @@ export class SprayPray extends DurableObject<Env> {
               this.version(),
               {
                 coordinator: this.ctx.id.name!,
-                sender: index % WALLET_COUNT,
-                slot: Math.floor(index / WALLET_COUNT),
-                slots: this.laneCount / WALLET_COUNT,
+                sender: index % this.wallets,
+                slot: Math.floor(index / this.wallets),
+                slots: this.laneCount / this.wallets,
               },
               lane,
               outstanding,
@@ -334,7 +336,7 @@ export class SprayPray extends DurableObject<Env> {
       phase,
       message,
       settings: this.settings,
-      walletCount: WALLET_COUNT,
+      walletCount: this.wallets,
       owner: this.owner,
       attempted: sum((s) => s.attempted),
       accepted: sum((s) => s.accepted),

@@ -2,7 +2,6 @@ import { publicErrorMessage, RpcConnectionError } from "./errors.js";
 import type { Chain, Operation } from "./chain.js";
 import {
   defaults,
-  WALLET_COUNT,
   type Point,
   type Settings,
   type Snapshot,
@@ -10,6 +9,8 @@ import {
 
 export interface EngineLimits {
   outstanding: number;
+  /** Wallets in the transfer ring; each sender adds 7,000 transfers per block. */
+  wallets: number;
   receiptTimeoutMs: number;
   leaseMs: number;
   pollConcurrency: number;
@@ -34,6 +35,14 @@ export function isNetworkFailure(error: unknown): boolean {
   );
 }
 
+/** Longest pause after a backend reports itself unavailable. */
+const BACKOFF_MAX_MS = 8_000;
+
+/** The gateway's `-32050` answer: the backend behind it is down, not the transfer. */
+export function isBackendUnavailable(message: string): boolean {
+  return /backend unavailable|-32050/i.test(message);
+}
+
 export function engineLimits(env: Record<string, unknown> = {}): EngineLimits {
   const text = (name: string) => {
     const value = env[name];
@@ -51,6 +60,7 @@ export function engineLimits(env: Record<string, unknown> = {}): EngineLimits {
     throw new Error("SPRAY_FIRST_POLL_RATIO must be between 0 and 2");
   return {
     outstanding: number("SPRAY_OUTSTANDING", 8192, 1),
+    wallets: number("SPRAY_WALLETS", 4, 2),
     receiptTimeoutMs: 60_000,
     leaseMs: 1500,
     pollConcurrency: number("SPRAY_POLL_CONCURRENCY", 4, 1),
@@ -99,6 +109,8 @@ export class Engine {
   private inFlight = 0;
   private reserved = 0;
   private polling = 0;
+  private backoffMs = 0;
+  private backoffUntil = 0;
   private closed = false;
   private pending = new Map<string, Pending>();
   private counts = {
@@ -163,7 +175,7 @@ export class Engine {
       );
     this.phase = "funding";
     try {
-      await this.chain.setup(WALLET_COUNT, (message) => {
+      await this.chain.setup(this.limits.wallets, (message) => {
         this.message = message;
         this.emit("state", this.snapshot());
       });
@@ -253,7 +265,7 @@ export class Engine {
       phase: this.phase,
       message: this.message,
       settings: this.settings,
-      walletCount: WALLET_COUNT,
+      walletCount: this.limits.wallets,
       owner: this.owner,
       ...this.counts,
       pending: this.pending.size,
@@ -283,7 +295,7 @@ export class Engine {
           this.limits.outstanding,
       errors: [...this.errors],
       network: this.chain.network,
-      addresses: this.chain.addresses.slice(0, WALLET_COUNT),
+      addresses: this.chain.addresses.slice(0, this.limits.wallets),
     };
   }
 
@@ -291,6 +303,7 @@ export class Engine {
     while (
       !this.closed &&
       this.owner &&
+      Date.now() >= this.backoffUntil &&
       this.inFlight < this.settings.concurrency &&
       this.pending.size + this.reserved + this.settings.batchSize <=
         this.limits.outstanding
@@ -307,7 +320,7 @@ export class Engine {
     try {
       const operations = await this.chain.prepare(
         this.settings.batchSize,
-        WALLET_COUNT,
+        this.limits.wallets,
       );
       this.reserved -= batchSize;
       preparing = false;
@@ -409,7 +422,7 @@ export class Engine {
   }
 
   private poll(): void {
-    if (this.closed) return;
+    if (this.closed || Date.now() < this.backoffUntil) return;
     while (this.polling < this.limits.pollConcurrency) {
       const now = Date.now();
       const batch: Pending[] = [];
@@ -429,13 +442,18 @@ export class Engine {
   private async pollBatch(batch: Pending[]): Promise<void> {
     try {
       const outcomes = await this.chain.poll(batch.map((p) => p.operation));
+      let down = false;
       outcomes.forEach((outcome, i) => {
-        if (outcome?.state === "unavailable") this.recordError(outcome.message);
-        else if (outcome)
+        if (outcome?.state === "unavailable") {
+          this.recordError(outcome.message);
+          down ||= isBackendUnavailable(outcome.message);
+        } else if (outcome)
           this.settle(batch[i]!.operation.hash, outcome.state, outcome.height);
       });
+      if (down) this.backOff();
+      else this.backoffMs = 0;
     } catch (error) {
-      this.recordError(error);
+      if (isBackendUnavailable(this.recordError(error))) this.backOff();
     } finally {
       const overdue: Pending[] = [];
       for (const item of batch) {
@@ -448,7 +466,11 @@ export class Engine {
           item.statusAt = Infinity;
           overdue.push(item);
         }
-        if (Date.now() - item.sentAt > this.limits.receiptTimeoutMs) {
+        // An outage pauses the deadline; the first poll after it decides the transfer.
+        if (
+          Date.now() >= this.backoffUntil &&
+          Date.now() - item.sentAt > this.limits.receiptTimeoutMs
+        ) {
           this.settle(item.operation.hash, "unresolved");
           this.recordError("Receipt deadline reached; outcome unresolved");
         } else {
@@ -572,6 +594,18 @@ export class Engine {
       this.phase = "ready";
       this.message = "Ready to spray";
     }
+  }
+
+  /**
+   * Pause sending and polling while a backend is down, doubling up to BACKOFF_MAX_MS.
+   * The spray keeps its lease and resumes on the first tick after the pause.
+   */
+  private backOff(): void {
+    this.backoffMs = Math.min(
+      Math.max(this.backoffMs * 2, 1_000),
+      BACKOFF_MAX_MS,
+    );
+    this.backoffUntil = Date.now() + this.backoffMs;
   }
 
   private recordError(error: unknown): string {

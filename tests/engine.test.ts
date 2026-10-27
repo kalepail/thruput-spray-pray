@@ -87,34 +87,37 @@ test("bounds pending work and drains successful receipts after release", async (
   assert.equal(engine.snapshot().averageReceiptMs, 0);
 });
 
-test("configuration and transaction preparation always use four wallets", async (t) => {
+test("configuration and transaction preparation always use the configured wallet count", async (t) => {
   const funded: number[] = [];
   const prepared: number[] = [];
   let sequence = 0;
-  const engine = fixture({
-    async setup(count) {
-      funded.push(count);
+  const engine = fixture(
+    {
+      async setup(count) {
+        funded.push(count);
+      },
+      async prepare(count, wallets) {
+        prepared.push(wallets);
+        return Array.from({ length: count }, () => ({
+          hash: String(sequence++),
+          payload: "x",
+          sender: 0,
+          receiver: 1,
+        }));
+      },
     },
-    async prepare(count, wallets) {
-      prepared.push(wallets);
-      return Array.from({ length: count }, () => ({
-        hash: String(sequence++),
-        payload: "x",
-        sender: 0,
-        receiver: 1,
-      }));
-    },
-  });
+    { wallets: 6 },
+  );
   t.after(() => engine.close());
   await ready(engine);
   await engine.configure({ batchSize: 2, concurrency: 1 });
-  assert.deepEqual(funded, [4, 4]);
-  assert.equal(engine.snapshot().walletCount, 4);
+  assert.deepEqual(funded, [6, 6]);
+  assert.equal(engine.snapshot().walletCount, 6);
   engine.spray("a", { x: 0, y: 0 });
   await waitFor(() => engine.snapshot().attempted > 0);
   engine.stop("a");
   await waitFor(() => engine.snapshot().phase === "ready");
-  assert.ok(prepared.length > 0 && prepared.every((count) => count === 4));
+  assert.ok(prepared.length > 0 && prepared.every((count) => count === 6));
 });
 
 test("lost submit response is polled by original hash, never resubmitted", async (t) => {
@@ -557,4 +560,43 @@ test("live rates use the covered window, not a fixed 5 s, after activity starts"
     liveTps >= succeeded,
     `liveTps ${liveTps} for ${succeeded} receipts`,
   );
+});
+
+test("a backend outage pauses sending and polling, then the spray resumes", async (t) => {
+  let down = true;
+  let polls = 0;
+  const engine = fixture(
+    {
+      async poll(ops) {
+        polls++;
+        return ops.map(() =>
+          down
+            ? {
+                state: "unavailable" as const,
+                message:
+                  "Receipt RPC: backend unavailable: indexer not connected",
+              }
+            : { state: "succeeded" as const, height: "10" },
+        );
+      },
+    },
+    { firstPollMs: 0, receiptTimeoutMs: 200 },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0.5, y: 0.5 });
+  await waitFor(() => polls > 0);
+  const attempted = engine.snapshot().attempted;
+  const pollsAtOutage = polls;
+  // Inside the first 1 s pause: no new transfers, no new polls, no deadline settles.
+  await sleep(500);
+  assert.equal(engine.snapshot().attempted, attempted);
+  assert.ok(polls - pollsAtOutage <= 2);
+  assert.equal(engine.snapshot().unresolved, 0);
+  down = false;
+  await waitFor(() => engine.snapshot().succeeded >= attempted, 5000);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready", 5000);
+  assert.equal(engine.snapshot().failed, 0);
+  assert.equal(engine.snapshot().unresolved, 0);
 });

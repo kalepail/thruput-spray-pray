@@ -12,9 +12,15 @@ export default defineConfig(({ mode }) => {
   const network =
     shell.THRUPUT_NETWORK ?? (mode === "devnet" ? "devnet" : "localnet");
   const devnet = network === "devnet";
+  // A test deploy can run beside the hosted app under another name.
+  const name = shell.SPRAY_WORKER_NAME ?? "thruput-spray-pray";
+  // Devnet sustains about 45k tx/s; 24 wallets keep the 7,000-per-sender-per-block
+  // replay-cache cap above that. A local node is far smaller.
+  const tuned = (hosted: string, local: string, variable: string) =>
+    shell[variable] ?? (devnet ? hosted : local);
   return {
     worker: {
-      name: "thruput-spray-pray",
+      name,
       compatibilityDate: "2026-10-06",
       entrypoint,
       observability: { enabled: true },
@@ -34,15 +40,15 @@ export default defineConfig(({ mode }) => {
         ASSETS: bindings.assets(),
         VERSION: bindings.versionMetadata(),
         SPRAY_PRAY: bindings.durableObject({
-          worker: "thruput-spray-pray",
+          worker: name,
           exportName: "SprayPray",
         }),
         SPRAY_LANE: bindings.durableObject({
-          worker: "thruput-spray-pray",
+          worker: name,
           exportName: "SprayLane",
         }),
         PLACEMENT: bindings.durableObject({
-          worker: "thruput-spray-pray",
+          worker: name,
           exportName: "Placement",
         }),
         THRUPUT_NETWORK: bindings.text(network),
@@ -54,19 +60,28 @@ export default defineConfig(({ mode }) => {
         THRUPUT_NETWORK_HASH: bindings.text(
           "DFizVugYrvktaiKivvCx2P1ApArLuyYmH6vN3HN7FcNT",
         ),
-        // Lanes per run; a multiple of the four wallets. Each lane uses one core.
-        SPRAY_LANES: bindings.text("8"),
+        // Wallets in the transfer ring; each adds about 7,000 transfers per block.
+        SPRAY_WALLETS: bindings.text(tuned("24", "4", "SPRAY_WALLETS")),
+        // Lanes per run; a multiple of the wallets. Each lane uses one core.
+        SPRAY_LANES: bindings.text(tuned("48", "8", "SPRAY_LANES")),
         // Public test keys. The hosted app uses its own seed so local runs never share
         // its wallets or devnet's in-flight budget for them.
         SPRAY_WALLET_SEED: bindings.text(
-          devnet
-            ? "spray-and-pray/hosted-worker/v1"
-            : "spray-and-pray/local-demo/v1",
+          tuned(
+            "spray-and-pray/hosted-worker/v1",
+            "spray-and-pray/local-demo/v1",
+            "SPRAY_WALLET_SEED",
+          ),
         ),
         SPRAY_BATCH_SIZE: bindings.text("256"),
-        SPRAY_CONCURRENCY: bindings.text("32"),
-        // 32,768 in flight already saturates devnet; more only adds receipt delay.
-        SPRAY_OUTSTANDING: bindings.text("32768"),
+        SPRAY_CONCURRENCY: bindings.text(
+          tuned("96", "32", "SPRAY_CONCURRENCY"),
+        ),
+        // Devnet receipts take 6-8 s at its ceiling; 393,216 in flight covers that,
+        // and 262,144 measured 20% slower.
+        SPRAY_OUTSTANDING: bindings.text(
+          tuned("393216", "32768", "SPRAY_OUTSTANDING"),
+        ),
         SPRAY_POLL_CONCURRENCY: bindings.text("8"),
         SPRAY_POLL_BATCH: bindings.text("1000"),
         SPRAY_RPC_SOCKETS: bindings.text("12"),

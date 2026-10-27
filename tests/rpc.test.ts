@@ -180,7 +180,7 @@ test("receipts validate identity and execution, not just presence", () => {
   );
 });
 test("input boundary rejects invalid settings and coordinates", () => {
-  for (const concurrency of [0, 33, 2.5])
+  for (const concurrency of [0, 513, 2.5])
     assert.equal(
       commandSchema.safeParse({
         type: "configure",

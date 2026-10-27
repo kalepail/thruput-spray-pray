@@ -23,6 +23,8 @@ import type { NetworkConfig } from "./network.js";
 export type { Operation } from "./prepare.js";
 
 const TIP_MAX_AGE_MS = 30_000;
+/** How long a shard waits for the shard in slot 0 to fund a shared sender. */
+const FUNDING_WAIT_MS = 120_000;
 export interface Chain {
   network: string;
   addresses: string[];
@@ -34,6 +36,16 @@ export interface Chain {
   poll(operations: Operation[]): Promise<ReceiptPollResult[]>;
   /** Scheduler status for transfers whose receipts are overdue. */
   status?(operations: Operation[]): Promise<TxStatus[]>;
+}
+
+/** Whether `wallet` holds at least 1 test token within `waitMs`. */
+async function funded(wallet: Wallet, waitMs: number): Promise<boolean> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    if ((await wallet.getBalance()).rawBalance >= 10_000_000n) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
 }
 
 export function thruputChain(
@@ -99,12 +111,20 @@ export function thruputChain(
         // Receivers only need an address; only signing wallets spend storage deposits.
         if (senders && !senders.includes(i)) continue;
         const balance = await wallet.getBalance();
-        if (balance.rawBalance < 10_000_000n) {
+        if (balance.rawBalance < 10_000_000n && (slot ?? 0) > 0) {
+          // Shards sharing a sender let slot 0 call the faucet; two calls for one
+          // recipient race, and the loser reports a failed funding observation.
+          progress(`Waiting for wallet ${i + 1} of ${count} to be funded`);
+          if (!(await funded(wallet, FUNDING_WAIT_MS)))
+            throw new Error(
+              `${config.name} wallet ${i + 1} (${toBase58(wallet.account.address)}) was not funded by its first shard. Retry Apply configuration.`,
+            );
+        } else if (balance.rawBalance < 10_000_000n) {
           progress(`Funding wallet ${i + 1} of ${count}`);
           await wallet.requestAirdrop().catch(async (error: unknown) => {
-            // Shards that share a sender fund it at the same time; the faucet then
-            // refuses all but one request. Accept the wallet if another one landed.
-            if ((await wallet.getBalance()).rawBalance >= 10_000_000n) return;
+            // The grant can land after the client stops observing it. Accept the
+            // wallet if the balance arrives shortly after.
+            if (await funded(wallet, 30_000)) return;
             const reason =
               error instanceof Error ? error.message : String(error);
             throw new Error(

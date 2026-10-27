@@ -4,7 +4,6 @@ import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import WebSocket from "ws";
 import {
-  WALLET_COUNT,
   defaults,
   type ServerMessage,
   type Snapshot,
@@ -16,6 +15,7 @@ assert.ok(
   Number.isFinite(duration) && duration >= 1000 && duration <= 300_000,
   "LOAD_SECONDS must be between 1 and 300",
 );
+const allowErrors = process.env.LOAD_ALLOW_ERRORS === "1";
 const ws = new WebSocket(url.replace(/^http/, "ws") + "/live");
 const errors: string[] = [];
 ws.on("message", (raw) => {
@@ -32,7 +32,8 @@ async function until(predicate: (snapshot: Snapshot) => boolean) {
   while (Date.now() < deadline) {
     const snapshot = await state();
     if (predicate(snapshot)) return snapshot;
-    assert.deepEqual(errors, []);
+    // Max-rate probes log recoverable lane errors; failed and unresolved still fail.
+    if (!allowErrors) assert.deepEqual(errors, []);
     await sleep(100);
   }
   throw new Error(`Load run timed out: ${JSON.stringify(await state())}`);
@@ -74,8 +75,9 @@ try {
   assert.equal(result.failed, 0);
   assert.equal(result.unresolved, 0);
   assert.equal(result.succeeded, result.attempted);
-  assert.equal(result.walletCount, WALLET_COUNT);
-  assert.equal(result.addresses.length, WALLET_COUNT);
+  assert.equal(result.addresses.length, result.walletCount);
+  if (process.env.LOAD_WALLETS)
+    assert.equal(result.walletCount, Number(process.env.LOAD_WALLETS));
   console.log(
     JSON.stringify({
       wallets: result.walletCount,
@@ -84,6 +86,7 @@ try {
       elapsedMs: Math.round(result.elapsedMs),
       failed: result.failed,
       unresolved: result.unresolved,
+      errors: [...new Set(errors)],
     }),
   );
   await mkdir("test-results", { recursive: true });

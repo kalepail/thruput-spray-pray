@@ -1,4 +1,3 @@
-export const WALLET_COUNT = 4;
 export interface Settings {
   batchSize: number;
   concurrency: number;

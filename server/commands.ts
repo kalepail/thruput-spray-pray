@@ -4,7 +4,7 @@ import type { Settings, Point } from "../shared/protocol.js";
 export const settingsSchema = z.strictObject({
   // Devnet accepts up to 1,000 entries per JSON-RPC array.
   batchSize: z.number().int().min(1).max(1000),
-  concurrency: z.number().int().min(1).max(32),
+  concurrency: z.number().int().min(1).max(512),
 }) satisfies z.ZodType<Settings>;
 const pointSchema = z.object({
   x: z.number().min(0).max(1),
