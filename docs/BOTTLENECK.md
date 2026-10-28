@@ -106,6 +106,29 @@ A/B of the declared gas, test Worker `thruput-spray-pray-gas` (seed
 A1 was the first run after a deploy. **Conclusion:** the declared gas does not limit tx/s.
 50,000 / 45,000 is safe if a lower reservation is ever wanted, but it gains nothing now.
 
+## Test 3: receipt lookups sampled 1 in 1,000
+
+Each lane looks up the receipt of every transfer, about 45k lookups a second at full
+rate. To see whether that read load slows the chain, `SPRAY_RECEIPT_SAMPLE=N` looks up 1
+in N transfers. The others settle when their batch's probe lands, and are looked up only
+if the probe fails. `assumed` counts transfers settled without a lookup.
+
+Test Worker `thruput-spray-pray-sample` (seed `spray-and-pray/receipt-sample/v1`, since
+deleted), 24 wallets, 48 lanes, 393,216 in flight, 120 s each. Run A stopped spraying
+after about 68 s, so A2 repeats it.
+
+| Run | Lookups        | Succeeded | Assumed   | tx/s   | Busy block period | Receipt avg | Failed / unresolved |
+| --- | -------------- | --------- | --------- | ------ | ----------------- | ----------- | ------------------- |
+| A   | every transfer | 2,456,832 | 0         | 36,354 | 2.87 s            | 9.9 s       | 0 / 0               |
+| B   | 1 in 1,000     | 4,493,056 | 4,471,082 | 35,340 | 3.02 s            | 10.5 s      | 0 / 0               |
+| A2  | every transfer | 4,783,616 | 0         | 37,590 | 2.99 s            | 9.8 s       | 0 / 0               |
+
+**Conclusion:** receipt polling does not limit tx/s. B removed 99.5% of the lookups, and
+the rate, block period, and receipt time did not improve. In B, 5,212 submissions had an
+ambiguous response and then settled from their probe without their own lookup, so the
+hosted app keeps `SPRAY_RECEIPT_SAMPLE=1`. A firehose or faster indexer would shorten the
+headline's receipt lag, but it would not raise tx/s.
+
 ## Upstream benchmark for comparison
 
 `groundhogchain/metrics_history` (sparse clone at `../metrics_history`) stores hogd CI
@@ -128,7 +151,7 @@ used 48 accounts and got a lower rate, so account count alone does not explain t
    `commit_duration_seconds`, and CPU for each thread.
 2. Workload changes with one source: a custom ERC20 in place of the native token, and
    unique receivers in place of the ring. (Lower declared gas: done, no change; see Test 2.)
-3. Receipts sampled at 1 in 1,000, to take read load off the indexer.
+3. Receipts sampled at 1 in 1,000: done, no change; see Test 3.
 4. Ask the devnet team how the public gateway (`thruput-tools`) submits to the scheduler:
    one transfer per call or batches, and how many connections.
 5. AWS senders in us-west-2: test 1 shows no sender limit, so skip this for throughput.

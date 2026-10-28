@@ -241,12 +241,12 @@ average at 2.0 s. `SPRAY_RATE` paces sends to a total rate instead of filling th
 in-flight cap at once. Measured over 30-second runs with 24 wallets (chain rate:
 our transfers per loaded block / that block's own interval):
 
-| Sending       | Chain tx/s | Average block | Longest block | Receipts counted after commit |
-| ------------- | ---------: | ------------: | ------------: | ----------------------------: |
-| Unpaced       |     46,919 |        2.75 s |        2.87 s |                         5.5 s |
-| 45,000/s      |     43,212 |        2.78 s |        3.31 s |                         6.5 s |
-| 35,000/s      |     34,105 |        2.51 s |        2.63 s |                         4.5 s |
-| 25,000/s      |     24,342 |        2.35 s |        2.38 s |                         2.2 s |
+| Sending  | Chain tx/s | Average block | Longest block | Receipts counted after commit |
+| -------- | ---------: | ------------: | ------------: | ----------------------------: |
+| Unpaced  |     46,919 |        2.75 s |        2.87 s |                         5.5 s |
+| 45,000/s |     43,212 |        2.78 s |        3.31 s |                         6.5 s |
+| 35,000/s |     34,105 |        2.51 s |        2.63 s |                         4.5 s |
+| 25,000/s |     24,342 |        2.35 s |        2.38 s |                         2.2 s |
 
 Pacing near the limit costs throughput without shortening blocks, so the hosted
 app sends unpaced. A lower rate trades throughput for shorter blocks and faster
@@ -343,6 +343,7 @@ curl -s -X POST https://rpc.thruput.network -H 'content-type: application/json' 
 | `SPRAY_RATE`                                 | `0`         | Total sends per second across lanes; 0 sends unpaced       |
 | `SPRAY_POLL_CONCURRENCY`, `SPRAY_POLL_BATCH` | `8`, `1000` | Receipt lookups per lane; RPC arrays take up to 1,000      |
 | `SPRAY_PROBE_INTERVAL_MS`                    | `200`       | Poll one transfer per batch often, the rest after it lands |
+| `SPRAY_RECEIPT_SAMPLE`                       | `1`         | Look up 1 in N; the rest settle from their batch's probe   |
 | `SPRAY_FIRST_POLL_RATIO`                     | `0.8`       | First poll near the average receipt delay                  |
 | `SPRAY_SUBMIT_RETRIES`                       | `2`         | Resend identical bytes only after a lost connection        |
 | `SPRAY_STATUS_AFTER_MS`                      | `6000`      | Check scheduler status for receipts this late              |
