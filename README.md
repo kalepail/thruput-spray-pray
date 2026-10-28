@@ -4,7 +4,7 @@ Hold, drag, and send a little chaos through Thruput.
 
 A full-screen particle playground backed by real ERC20 transfers. A Cloudflare
 Worker with Durable Objects signs and submits the transactions; the browser renders
-a particle stream for them. Transfers circulate between four demo wallets. Open
+a particle stream for them. Transfers circulate between 24 demo wallets. Open
 the **Control room** to watch confirmed throughput and adjust load tuning.
 
 **Try it:** https://thruput-spray-pray.sdf-ecosystem.workers.dev (Thruput devnet).
@@ -48,7 +48,7 @@ npm run dev
 
 Open **http://127.0.0.1:5177**. `npm run dev` runs the Worker and its Durable
 Objects locally in `workerd` and connects to **http://127.0.0.1:9545**. The lanes
-derive the fixed four-wallet pool, check balances, and request local test HOG where
+derive a four-wallet pool, check balances, and request local test HOG where
 needed. First-time funding can take a few seconds per wallet; progress appears
 above the canvas. There is no wallet extension, signing prompt, contract build, or
 manual key setup.
@@ -90,8 +90,9 @@ node.
   Particles stream from the pointer, so a drag leaves a continuous trail.
 - **Keyboard:** focus the canvas with Tab, then hold Space. Escape stops.
 - **Control room:** view transaction and block statistics. Load tuning offers
-  1–1,000 transactions per batch and 1–32 concurrent submission requests,
-  defaulting to 256 and 32. The wallet pool is fixed at four.
+  1–1,000 transactions per batch and 1–512 concurrent submission requests,
+  defaulting to 256 and 96 on devnet (32 locally). `SPRAY_WALLETS` sets the
+  wallet pool: 24 on devnet, 4 locally.
 - **Release:** stop generating transactions. The spray ends at the pointer;
   submitted work keeps draining in the counters.
 - **Export run:** download the current server snapshot as JSON.
@@ -115,22 +116,24 @@ cumulative statistics. Reset before comparing runs.
 
 Each transaction calls the native HOG token's generated `ERC20.transfer`
 binding through a public-key account's `DefaultWallet`. It transfers **one base
-unit (0.0000001 HOG)** to the next wallet in a fixed four-wallet ring. Each
+unit (0.0000001 HOG)** to the next wallet in a ring of 24 wallets. Each
 wallet acts as both sender and receiver. HOG exposes the ERC20 interface on
 Thruput; this does not use an EVM.
 
 ```
 browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 object)
                                      │  lease, WebSockets, merged statistics
-                                     ├──every 100 ms──▶ SprayLane × 8
+                                     ├──every 100 ms──▶ SprayLane × 48
                                      │                    sign · submit · poll
                                      └──▶ Placement (1 object): picks coordinator and lanes
 ```
 
 - **SprayLane** runs the pipeline in `server/engine.ts` for one sender wallet; two
   lanes share each wallet. One Durable Object runs on one isolate and core, and it
-  measured about 2,200 tx/s with signing and receipt parsing. Eight lanes run in
-  parallel, each with its own connections.
+  measured about 2,200 tx/s with signing and receipt parsing. 48 lanes run in
+  parallel on devnet (8 locally), each with its own connections. Only the first
+  lane of each wallet calls the faucet; the other waits up to five minutes for
+  the grant, because two calls for one recipient race.
 - **SprayPray** holds the browser WebSockets and the spray lease, forwards
   heartbeats to the lanes, relays each submitted batch to browsers as particles,
   and merges the lanes' reports into one snapshot.
@@ -163,7 +166,8 @@ height per sender up to 7,000, moves forward, never reuses a height, and waits f
 new blocks when its window is full. Lanes persist the cursor, so a restart
 continues past heights it already filled; a cursor beyond the current window (a
 fresh local node or a devnet wipe) is ignored. Sustained throughput is bounded by about
-7,000 transfers per wallet per block. The earlier counter-based buckets overfilled
+7,000 transfers per wallet per block. With 24 wallets that bound (168,000 per
+block) sits above devnet's own limit. The earlier counter-based buckets overfilled
 heights after about two minutes of continuous load.
 
 Receipts that stay missing are checked with `getTransactionStatus`. On
@@ -171,6 +175,11 @@ Receipts that stay missing are checked with `getTransactionStatus`. On
 same hash and can never create a second transfer. Network failures are resent the
 same way; HTTP errors are not. Devnet answers a duplicate of an admitted transfer
 with the same hash, so a rejection after a resend counts as Failed.
+
+When the gateway answers `-32050` (a backend behind it is down), a lane pauses
+sending and polling for 1 s, doubling up to 8 s, and resumes on its own. The
+spray keeps its lease, and transfers do not time out to Unresolved during the
+pause.
 
 The canvas uses a fixed **24,000-particle** pool, draws each color in one pass, and
 caps device-pixel ratio at 2.
@@ -190,8 +199,8 @@ caps device-pixel ratio at 2.
 | Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window   |
 | Sending               | Attempts in the last second                                                       |
 
-Receipts arrive in block-sized lumps: under load a block carries 25,000–40,000
-of these transfers every ~2.5 s, so any short time window swings with block
+Receipts arrive in block-sized lumps: under load a block carries 100,000–200,000
+of these transfers every ~3 s, so any short time window swings with block
 timing. The headline therefore measures completed blocks. Before two blocks land
 it shows the average since the spray began; after work ends, a trailing window
 decays to zero.
@@ -273,9 +282,10 @@ curl -s -X POST https://rpc.thruput.network -H 'content-type: application/json' 
 
 | Binding                                      | Value       | Purpose                                                    |
 | -------------------------------------------- | ----------- | ---------------------------------------------------------- |
-| `SPRAY_LANES`                                | `8`         | Lane objects; a multiple of the four wallets               |
-| `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY`      | `256`, `32` | Starting settings; concurrency is divided between lanes    |
-| `SPRAY_OUTSTANDING`                          | `32768`     | Total in flight; this already saturates devnet             |
+| `SPRAY_WALLETS`                              | `24`        | Wallets in the ring; each adds ~7,000 transfers per block  |
+| `SPRAY_LANES`                                | `48`        | Lane objects; a multiple of `SPRAY_WALLETS`                |
+| `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY`      | `256`, `96` | Starting settings; concurrency is divided between lanes    |
+| `SPRAY_OUTSTANDING`                          | `393216`    | Total in flight; covers 6–8 s receipts at devnet's limit   |
 | `SPRAY_POLL_CONCURRENCY`, `SPRAY_POLL_BATCH` | `8`, `1000` | Receipt lookups per lane; RPC arrays take up to 1,000      |
 | `SPRAY_PROBE_INTERVAL_MS`                    | `200`       | Poll one transfer per batch often, the rest after it lands |
 | `SPRAY_FIRST_POLL_RATIO`                     | `0.8`       | First poll near the average receipt delay                  |
@@ -285,10 +295,48 @@ curl -s -X POST https://rpc.thruput.network -H 'content-type: application/json' 
 | `SPRAY_NONCES_PER_HEIGHT`                    | `7000`      | Per sender per height; the protocol limit is 8,000         |
 | `SPRAY_RPC_SOCKETS`                          | `12`        | Keep-alive sockets per lane (HTTPS endpoints only)         |
 
+Values are the devnet defaults. A local node uses 4 wallets, 8 lanes, concurrency
+32, and 32,768 in flight. Shell variables with the same names override them at
+deploy time, and `SPRAY_WORKER_NAME` deploys a test copy beside the hosted app.
+
 Engine limits are validated: integers, at least 1 where 0 would stall the engine,
 and a first-poll ratio between 0 and 2.
 
 ## Verified results
+
+### Hosted on Cloudflare, devnet (October 27, 2026)
+
+Devnet 0.41.0, wire 14.1.1, with no other load. Failed and unresolved were 0 in
+every row. Each wallet count used two lanes per wallet and 16,384 transfers in
+flight per wallet.
+
+| Configuration                                      | Successful tx/s | Receipt avg |
+| -------------------------------------------------- | --------------: | ----------: |
+| 16 wallets, 256 / 64, 60 s                         |          44,095 |       5.2 s |
+| 24 wallets, 256 / 96, 60 s                         |          46,760 |       7.4 s |
+| 32 wallets, 256 / 128, 60 s                        |          45,119 |       9.5 s |
+| 24 wallets, 180 s soak (8,385,536 transfers)       |          45,245 |       8.1 s |
+| 24 wallets, 262,144 in flight, 180 s               |          36,338 |       6.7 s |
+| Hosted defaults, 180 s (7,919,872 transfers)       |          42,480 |       8.6 s |
+| Browser journey (mouse, keyboard, touch, controls) |          17,771 |       9.8 s |
+
+Past 24 wallets, more load adds only receipt delay: devnet sustains about 45k
+tx/s for this workload. Blocks carry 100,000–400,000 transfers and arrive every
+2.8–3.2 s.
+
+`npm run test:latency` sends one marked transfer per second from its own wallet
+and times each step. Beside the 180-second hosted run, from a workstation on the
+US West Coast:
+
+| Step                                  | Idle p50 | Under load p50 | Under load p90 |
+| ------------------------------------- | -------: | -------------: | -------------: |
+| `sendTransaction` answers             |   0.18 s |         0.18 s |         0.20 s |
+| `getTransactionStatus` is `committed` |    1.5 s |          2.8 s |          4.5 s |
+| Then `getTransactionReceipt` has it   |   0.18 s |          4.0 s |          5.4 s |
+| Total                                 |    1.7 s |          6.9 s |          9.4 s |
+
+Most of the delay under load comes after commit: receipts reach the indexer about
+4 s after the scheduler reports the transfer committed.
 
 ### Hosted on Cloudflare, devnet (October 20, 2026)
 
@@ -306,8 +354,9 @@ after release; failed and unresolved were 0 in every row.
 
 While spraying, devnet blocks carry 25,000–41,000 transfers and stretch from
 2.0 s to 2.2–3.3 s, with 2.4–2.6 s receipt delays. 32,768 transfers in flight
-already saturate devnet. These are observations of this client on a shared
-network, not consensus benchmarks.
+looked like saturation at the time; the October 27 runs show that four wallets
+were the limit. These are observations of this client on a shared network, not
+consensus benchmarks.
 
 Click feel, measured in Chromium against the hosted app: the first particle
 appears in the first frame (about 30 ms; about 300 ms before prediction and
@@ -318,9 +367,9 @@ frame.
 
 ### Local node (September 16, 2026)
 
-The tables below record earlier configurable-wallet versions of the Node app. The
-current demo uses four wallets; the old wallet-count sweep is retained as
-measurement history.
+The tables below record earlier configurable-wallet versions of the Node app. On
+a local node the signing client was the limit, so wallet count did not matter
+there; the old wallet-count sweep is retained as measurement history.
 
 Measured on September 16, 2026, on this workstation with a 500 ms interval local node,
 Node **22.23.1**, and the compiled application. Signing is inside the timed
@@ -347,6 +396,7 @@ npm run check          # Worker types, TypeScript, unit tests, formatting, produ
 npm run test:live      # Real local receipts and exact recipient balance delta
 npm run test:browser   # Mouse, keyboard, touch, controls, lifecycle; app required
 npm run test:load      # 10-second run against the running app's selected network
+npm run test:latency   # Times one transfer per second through commit and receipt
 npm run test:lease     # A second browser is refused; the lease passes on release
 npm run test:security  # Public endpoints, cross-origin WebSocket, same-origin font
 ```

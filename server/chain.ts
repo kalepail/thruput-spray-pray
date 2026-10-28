@@ -24,7 +24,7 @@ export type { Operation } from "./prepare.js";
 
 const TIP_MAX_AGE_MS = 30_000;
 /** How long a shard waits for the shard in slot 0 to fund a shared sender. */
-const FUNDING_WAIT_MS = 120_000;
+const FUNDING_WAIT_MS = 300_000;
 export interface Chain {
   network: string;
   addresses: string[];

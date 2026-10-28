@@ -18,16 +18,19 @@ work; the browser handles input, rendering, and live telemetry.
 - TypeScript throughout. Vite with a small DOM-based frontend and Canvas 2D;
   Node HTTP + WebSocket server. No framework is needed for the canvas and drawer.
 - Use the native HOG token's generated ERC20 binding. Each transaction transfers
-  one base unit to the next wallet in a fixed four-wallet ring. Every wallet
+  one base unit to the next wallet in a ring of `SPRAY_WALLETS` wallets. Every wallet
   acts as sender and receiver. This exercises actual token balances.
 - Derive repeatable, public development keys from a fixed experiment seed on the
   server. No wallet connection or browser signing. These keys hold test HOG only.
 - Default to Devnet at `https://rpc.thruput.network`, with the verified network
-  identity pinned. Provision the four-wallet pool through the Devnet faucet and
+  identity pinned. Provision the wallet pool through the Devnet faucet and
   verify funding before enabling the canvas. Localnet remains an explicit option.
-- Fix the pool at four wallets. Wallet-count sweeps showed no reliable throughput
-  gain in this client-limited workload. Expose only batch size and concurrent
-  submission requests as advanced load controls.
+- Set the pool size per deployment with `SPRAY_WALLETS`: 24 on devnet, 4 on a
+  local node. Each sender may use about 7,000 nonces per expiry height, so the
+  sustained rate is bounded by about 7,000 transfers per wallet per block. Four
+  wallets capped devnet near 12k tx/s; 24 wallets reach devnet's own limit of
+  about 45k tx/s. Expose only batch size and concurrent submission requests as
+  advanced load controls.
 - Bounded live pipeline: sign fresh batches, submit concurrent JSON-RPC batches,
   independently poll receipts. Yield between signing batches. Cap outstanding
   work so a slow node cannot create an unbounded queue.
@@ -95,7 +98,8 @@ controls. Errors remain readable without opening developer tools.
 - The browser starts without wallet setup; funding progress is visible.
 - Dragging produces real ERC20 transfers and colorful transaction particles.
 - Releasing input stops generation promptly, and pending receipts drain.
-- Exactly four wallets are provisioned and used regardless of load-tuning settings.
+- Exactly `SPRAY_WALLETS` wallets are provisioned and used regardless of
+  load-tuning settings.
 - Success is established by execution receipts; timeouts are not called failures.
 - Memory, submission concurrency, receipt polling, and WebSocket buffering are bounded.
 - Tests cover meaningful failure modes and at least one real-node browser journey.

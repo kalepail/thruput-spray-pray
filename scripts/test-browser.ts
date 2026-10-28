@@ -58,8 +58,10 @@ const starting = (await state()).settings;
 try {
   await page.goto(url);
   await waitReady();
-  assert.equal((await state()).walletCount, 4);
-  assert.equal((await state()).addresses.length, 4);
+  const wallets = (await state()).walletCount;
+  if (process.env.LOAD_WALLETS)
+    assert.equal(wallets, Number(process.env.LOAD_WALLETS));
+  assert.equal((await state()).addresses.length, wallets);
   await page.screenshot({ path: "test-results/desktop-idle.png" });
   await page.getByRole("button", { name: "Control room", exact: true }).click();
   await page.getByRole("button", { name: "Reset stats", exact: true }).click();
@@ -128,8 +130,8 @@ try {
   await waitReady();
   assert.equal((await state()).settings.batchSize, 64);
   assert.equal((await state()).settings.concurrency, 2);
-  assert.equal((await state()).walletCount, 4);
-  assert.equal((await state()).addresses.length, 4);
+  assert.equal((await state()).walletCount, wallets);
+  assert.equal((await state()).addresses.length, wallets);
   await page.getByRole("button", { name: "Close control room" }).click();
   await page.locator("#canvas").focus();
   await page.keyboard.down("Space");
