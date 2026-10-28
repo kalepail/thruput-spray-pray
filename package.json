@@ -20,7 +20,8 @@
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm test && npm run format:check && npm run build",
     "test:security": "tsx scripts/test-security.ts",
-    "test:lease": "tsx scripts/test-lease.ts"
+    "test:lease": "tsx scripts/test-lease.ts",
+    "watch:blocks": "tsx scripts/block-watch.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
