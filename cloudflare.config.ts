@@ -7,17 +7,17 @@ const shell =
     .process?.env ?? {};
 
 // `npm run dev` runs against a local node, like the other experiments.
-// `npm run deploy` passes `--mode devnet` for the hosted app.
+// `npm run deploy` passes `--mode futurenet` for the hosted app.
 export default defineConfig(({ mode }) => {
   const network =
-    shell.THRUPUT_NETWORK ?? (mode === "devnet" ? "devnet" : "localnet");
-  const devnet = network === "devnet";
+    shell.THRUPUT_NETWORK ?? (mode === "futurenet" ? "futurenet" : "localnet");
+  const futurenet = network === "futurenet";
   // A test deploy can run beside the hosted app under another name.
   const name = shell.SPRAY_WORKER_NAME ?? "thruput-spray-pray";
-  // Devnet sustains about 45k tx/s; 24 wallets keep the 7,000-per-sender-per-block
+  // Futurenet sustains about 45k tx/s; 24 wallets keep the 7,000-per-sender-per-block
   // replay-cache cap above that. A local node is far smaller.
   const tuned = (hosted: string, local: string, variable: string) =>
-    shell[variable] ?? (devnet ? hosted : local);
+    shell[variable] ?? (futurenet ? hosted : local);
   return {
     worker: {
       name,
@@ -54,9 +54,11 @@ export default defineConfig(({ mode }) => {
         THRUPUT_NETWORK: bindings.text(network),
         THRUPUT_RPC_URL: bindings.text(
           shell.THRUPUT_RPC_URL ??
-            (devnet ? "https://rpc.thruput.network" : "http://127.0.0.1:9545"),
+            (futurenet
+              ? "https://rpc.thruput.network"
+              : "http://127.0.0.1:9545"),
         ),
-        // Devnet identity read from getNetworkInfo; update after a devnet wipe.
+        // Futurenet identity read from getNetworkInfo; update after a Futurenet wipe.
         THRUPUT_NETWORK_HASH: bindings.text(
           "DFizVugYrvktaiKivvCx2P1ApArLuyYmH6vN3HN7FcNT",
         ),
@@ -65,7 +67,7 @@ export default defineConfig(({ mode }) => {
         // Lanes per run; a multiple of the wallets. Each lane uses one core.
         SPRAY_LANES: bindings.text(tuned("48", "8", "SPRAY_LANES")),
         // Public test keys. The hosted app uses its own seed so local runs never share
-        // its wallets or devnet's in-flight budget for them.
+        // its wallets or Futurenet's in-flight budget for them.
         SPRAY_WALLET_SEED: bindings.text(
           tuned(
             "spray-and-pray/hosted-worker/v1",
@@ -77,7 +79,7 @@ export default defineConfig(({ mode }) => {
         SPRAY_CONCURRENCY: bindings.text(
           tuned("96", "32", "SPRAY_CONCURRENCY"),
         ),
-        // Devnet receipts take 6-8 s at its ceiling; 393,216 in flight covers that,
+        // Futurenet receipts take 6-8 s at its ceiling; 393,216 in flight covers that,
         // and 262,144 measured 20% slower.
         SPRAY_OUTSTANDING: bindings.text(
           tuned("393216", "32768", "SPRAY_OUTSTANDING"),

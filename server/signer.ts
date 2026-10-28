@@ -13,7 +13,7 @@ export const DEFAULT_WALLET_SEED = "spray-and-pray/local-demo/v1";
 /**
  * Public, deterministic test keys. Web Crypto keeps signing in native code.
  * Deployments that may spray at the same time need different seeds, so they never
- * share wallets or devnet's in-flight budget for them.
+ * share wallets or Futurenet's in-flight budget for them.
  */
 export async function demoSigner(
   index: number,

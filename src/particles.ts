@@ -8,7 +8,7 @@ import {
 
 /**
  * Fixed scale per screen, so the spray grows and shrinks with throughput. Larger
- * screens draw more particles per transfer, and longer-lived ones; at devnet's limit
+ * screens draw more particles per transfer, and longer-lived ones; at Futurenet's limit
  * (~45k tx/s) a laptop draws ~15,000 spray particles a second and a phone ~9,000.
  * WebGL draws these at 60 fps; the Canvas 2D fallback keeps the sparser scale.
  */
@@ -20,7 +20,7 @@ function scaleFor(renderer: ParticleRenderer["name"], area: number) {
 }
 // Particles live 1.2-3.6 s (2.4 s on average) times the screen's life scale.
 const SPRAY_LIFE = 2.4;
-// Submitted batches arrive in waves: at devnet's limit the in-flight cap fills, then
+// Submitted batches arrive in waves: at Futurenet's limit the in-flight cap fills, then
 // waits for receipts, which come in blocks of 100,000 or more every ~3 s. A spray
 // therefore submits in a ~10 s cycle while the confirmed rate stays level. Particles
 // are released at the confirmed rate once one is known, so the spray matches the
@@ -30,7 +30,7 @@ const RATE_SECONDS = 2.5;
 // submission cycle. Release discards the queue, so this adds no trail after a click.
 const MAX_LAG_SECONDS = 12;
 // Release at the full rate only while this much is waiting, and slower below it, so a
-// pause in submissions (devnet sometimes confirms nothing for ~5 s) thins the spray
+// pause in submissions (Futurenet sometimes confirms nothing for ~5 s) thins the spray
 // gradually instead of cutting it off.
 const RESERVE_SECONDS = 4;
 // Particles that arrive while nobody has held the canvas yet (a viewer joining
@@ -38,7 +38,7 @@ const RESERVE_SECONDS = 4;
 const FLUSH_SECONDS = 0.08;
 const MIN_FLUSH_RATE = 40_000;
 // CPU budget per frame for drawing; slower devices draw fewer particles. WebGL stays
-// far inside it; the Canvas 2D fallback does not on phones at devnet's limit.
+// far inside it; the Canvas 2D fallback does not on phones at Futurenet's limit.
 const DRAW_BUDGET_MS = 8;
 // Particle times are float32 seconds from this epoch; rebase it before precision drops.
 const REBASE_SECONDS = 1_000;

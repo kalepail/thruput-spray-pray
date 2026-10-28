@@ -1,4 +1,4 @@
-// Records the period of each devnet block, with about two RPC reads per second.
+// Records the period of each Futurenet block, with about two RPC reads per second.
 // Run it beside one or more load tests. If the block period grows with load while the
 // rate stays flat, the chain is the limit, not the senders.
 import assert from "node:assert/strict";

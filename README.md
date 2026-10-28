@@ -7,7 +7,7 @@ Worker with Durable Objects signs and submits the transactions; the browser rend
 a particle stream for them. Transfers circulate between 24 demo wallets. Open
 the **Control room** to watch confirmed throughput and adjust load tuning.
 
-**Try it:** https://thruput-spray-pray.sdf-ecosystem.workers.dev (Thruput devnet).
+**Try it:** https://thruput-spray-pray.sdf-ecosystem.workers.dev (Thruput Futurenet).
 
 The same code runs hosted on Cloudflare and locally in `workerd` through Vite.
 There is no Node server and no container.
@@ -17,8 +17,8 @@ There is no Node server and no container.
 The addresses in this section (`127.0.0.1`) are local development defaults: the
 Vite dev server and a local Thruput node. The hosted app never uses them.
 
-Requirements: Node.js 26.11.1+, npm, read access to `@thruputchain/*` on
-GitHub Packages, and a running current Thruput RPC endpoint. Start your local
+Requirements: Node.js 26.11.1+, npm, and a running current Thruput RPC
+endpoint. `@thruputchain/*` installs from the public npm registry. Start your local
 node separately. The application owns its signers and uses the SDK for funding
 and transactions; it does not invoke the CLI.
 
@@ -29,14 +29,6 @@ From the `groundhog-experiments` repository root:
 ```sh
 cd spray-pray
 npm ci
-```
-
-`.npmrc` selects GitHub Packages for `@thruputchain/*`. Configure package-read
-authentication in your user npm configuration. If it references `GH_NPM_TOKEN`,
-you can supply the token through the environment:
-
-```sh
-GH_NPM_TOKEN="$(gh auth token)" npm ci
 ```
 
 ### 2. Start the app
@@ -56,20 +48,20 @@ manual key setup.
 Run app commands from `spray-pray`, not the experiments repository root.
 The app serves the API, WebSocket, and frontend from one port.
 
-| Variable          | Default                 | Purpose                                                |
-| ----------------- | ----------------------- | ------------------------------------------------------ |
-| `THRUPUT_NETWORK` | `localnet`              | `devnet` or `localnet`; read when `npm run dev` starts |
-| `THRUPUT_RPC_URL` | `http://127.0.0.1:9545` | RPC override for the selected network                  |
-| `APP_URL`         | `http://127.0.0.1:5177` | Test target: the local dev server unless set           |
-| `CHROMIUM_PATH`   | `/usr/bin/chromium`     | Browser test executable                                |
+| Variable          | Default                 | Purpose                                                   |
+| ----------------- | ----------------------- | --------------------------------------------------------- |
+| `THRUPUT_NETWORK` | `localnet`              | `futurenet` or `localnet`; read when `npm run dev` starts |
+| `THRUPUT_RPC_URL` | `http://127.0.0.1:9545` | RPC override for the selected network                     |
+| `APP_URL`         | `http://127.0.0.1:5177` | Test target: the local dev server unless set              |
+| `CHROMIUM_PATH`   | `/usr/bin/chromium`     | Browser test executable                                   |
 
 All other settings are bindings in `cloudflare.config.ts` (see
-[Tuning](#tuning)). The SDK validates the devnet identity in
+[Tuning](#tuning)). The SDK validates the Futurenet identity in
 `THRUPUT_NETWORK_HASH` before funding or signing; an RPC override does not change
 the selected network or its identity pin.
 
 The demo uses public deterministic test keys and test HOG. Faucet requests are
-subject to devnet cooldowns and quotas. Existing funded wallets are reused;
+subject to Futurenet cooldowns and quotas. Existing funded wallets are reused;
 funding errors appear in the app, and setup retries on its own every few seconds.
 
 ### Network selection
@@ -80,7 +72,7 @@ Localnet is the default. To select a separately started node on a different port
 THRUPUT_RPC_URL=http://127.0.0.1:19545 npm run dev
 ```
 
-`THRUPUT_NETWORK=devnet npm run dev` runs locally against the public devnet
+`THRUPUT_NETWORK=futurenet npm run dev` runs locally against the public Futurenet
 endpoint. Restart the app after changing networks or replacing an ephemeral local
 node.
 
@@ -91,8 +83,8 @@ node.
 - **Keyboard:** focus the canvas with Tab, then hold Space. Escape stops.
 - **Control room:** view transaction and block statistics. Load tuning offers
   1–1,000 transactions per batch and 1–512 concurrent submission requests,
-  defaulting to 256 and 96 on devnet (32 locally). `SPRAY_WALLETS` sets the
-  wallet pool: 24 on devnet, 4 locally.
+  defaulting to 256 and 96 on Futurenet (32 locally). `SPRAY_WALLETS` sets the
+  wallet pool: 24 on Futurenet, 4 locally.
 - **Release:** stop generating transactions. The spray ends at the pointer;
   submitted work keeps draining in the counters.
 - **Export run:** download the current server snapshot as JSON.
@@ -132,7 +124,7 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
 - **SprayLane** runs the pipeline in `server/engine.ts` for one sender wallet; two
   lanes share each wallet. One Durable Object runs on one isolate and core, and it
   measured about 2,200 tx/s with signing and receipt parsing. 48 lanes run in
-  parallel on devnet (8 locally), each with its own connections. Only the first
+  parallel on Futurenet (8 locally), each with its own connections. Only the first
   lane of each wallet calls the faucet; the other waits up to five minutes for
   the grant, because two calls for one recipient race.
 - **SprayPray** holds the browser WebSockets and the spray lease, forwards
@@ -141,7 +133,7 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
   snapshot.
 - **Placement** chooses the coordinator and the lane objects once. A Durable Object stays where it is
   created, and a `wnam` location hint lands anywhere in Western North America.
-  Placement keeps the candidates with the shortest round trip to the RPC (devnet
+  Placement keeps the candidates with the shortest round trip to the RPC (Futurenet
   runs in AWS us-west-2), because batch uploads from distant data centers are an
   order of magnitude slower. The coordinator relays every heartbeat and particle,
   so it sits beside the lanes too; a coordinator in Dallas added about 200 ms to
@@ -167,15 +159,15 @@ cannot fix that until the height expires. `server/expiry.ts` therefore fills one
 height per sender up to 7,000, moves forward, never reuses a height, and waits for
 new blocks when its window is full. Lanes persist the cursor, so a restart
 continues past heights it already filled; a cursor beyond the current window (a
-fresh local node or a devnet wipe) is ignored. Sustained throughput is bounded by about
+fresh local node or a Futurenet wipe) is ignored. Sustained throughput is bounded by about
 7,000 transfers per wallet per block. With 24 wallets that bound (168,000 per
-block) sits above devnet's own limit. The earlier counter-based buckets overfilled
+block) sits above Futurenet's own limit. The earlier counter-based buckets overfilled
 heights after about two minutes of continuous load.
 
 Receipts that stay missing are checked with `getTransactionStatus`. On
 `retry` or `unknown` the lane resends the identical signed bytes, which keeps the
 same hash and can never create a second transfer. Network failures are resent the
-same way; HTTP errors are not. Devnet answers a duplicate of an admitted transfer
+same way; HTTP errors are not. Futurenet answers a duplicate of an admitted transfer
 with the same hash, so a rejection after a resend counts as Failed.
 
 When the gateway answers `-32050` (a backend behind it is down), a lane pauses
@@ -249,13 +241,13 @@ The headline also trails the chain. At light load a block's receipts are all
 counted about 1 s after it commits; with ~300,000 in flight it takes 5–7 s,
 because receipt lookups scale with the number pending. The HUD shows the
 measured send-to-receipt time of the transfers confirmed in the last 5 s as
-"N s to confirm" (about 9–10 s at devnet's limit). The graph beside the headline
+"N s to confirm" (about 9–10 s at Futurenet's limit). The graph beside the headline
 plots the last 60 seconds: the confirmed rate as a filled line and the sent rate
 as a dashed line, so the gap between them is visible.
 
 #### Block time and send rate
 
-Devnet produces blocks one at a time: the proposer executes, peers replay, SCP
+Futurenet produces blocks one at a time: the proposer executes, peers replay, SCP
 agrees, each node commits, then the next block starts. Idle blocks take 2.03 s,
 and each block takes about 2.1 s plus 5.5 µs per transfer, so no load keeps the
 average at 2.0 s. `SPRAY_RATE` paces sends to a total rate instead of filling the
@@ -282,7 +274,7 @@ Particles visualize **submission**, not successful commitment. A batch reaches t
 canvas about 200 ms after a click: the round trip plus signing the first batch. While
 a browser holds the canvas, it therefore draws predicted particles at the recent
 submission rate from the first frame, at most 0.4 seconds ahead; real batches then
-pay those back instead of being drawn twice. At devnet's limit, submissions arrive
+pay those back instead of being drawn twice. At Futurenet's limit, submissions arrive
 in waves of about 10 seconds: the in-flight cap fills, then waits for receipts. The
 canvas queues them and releases particles at the confirmed rate shown in the
 headline, or at the smoothed submission rate until one is known. It keeps up to
@@ -321,7 +313,7 @@ unresolved outcomes are excluded.
 npm run deploy
 ```
 
-`scripts/deploy.sh` runs `cf deploy --mode devnet` (profile `CF_PROFILE`, default
+`scripts/deploy.sh` runs `cf deploy --mode futurenet` (profile `CF_PROFILE`, default
 `default`), then polls `/api/state` until the coordinator and every lane report the
 new Worker version and the app is ready. Running timers keep Durable Objects alive
 across a deploy; each request carries the Worker's version timestamp, and an older
@@ -343,9 +335,9 @@ report; statistics reset when objects restart.
   and deploy.
 - Workers Observability is enabled; Placement logs the objects it chooses.
 
-### After a devnet wipe
+### After a Futurenet wipe
 
-After a devnet wipe, `/api/state` reports `Network mismatch`. Read the new base58 hash,
+After a Futurenet wipe, `/api/state` reports `Network mismatch`. Read the new base58 hash,
 put it in `THRUPUT_NETWORK_HASH` in `cloudflare.config.ts`, and deploy:
 
 ```sh
@@ -355,24 +347,24 @@ curl -s -X POST https://rpc.thruput.network -H 'content-type: application/json' 
 
 ### Tuning
 
-| Binding                                      | Value       | Purpose                                                    |
-| -------------------------------------------- | ----------- | ---------------------------------------------------------- |
-| `SPRAY_WALLETS`                              | `24`        | Wallets in the ring; each adds ~7,000 transfers per block  |
-| `SPRAY_LANES`                                | `48`        | Lane objects; a multiple of `SPRAY_WALLETS`                |
-| `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY`      | `256`, `96` | Starting settings; concurrency is divided between lanes    |
-| `SPRAY_OUTSTANDING`                          | `393216`    | Total in flight; covers 6–8 s receipts at devnet's limit   |
-| `SPRAY_RATE`                                 | `0`         | Total sends per second across lanes; 0 sends unpaced       |
-| `SPRAY_POLL_CONCURRENCY`, `SPRAY_POLL_BATCH` | `8`, `1000` | Receipt lookups per lane; RPC arrays take up to 1,000      |
-| `SPRAY_PROBE_INTERVAL_MS`                    | `200`       | Poll one transfer per batch often, the rest after it lands |
-| `SPRAY_RECEIPT_SAMPLE`                       | `1`         | Look up 1 in N; the rest settle from their batch's probe   |
-| `SPRAY_FIRST_POLL_RATIO`                     | `0.8`       | First poll near the average receipt delay                  |
-| `SPRAY_SUBMIT_RETRIES`                       | `2`         | Resend identical bytes only after a lost connection        |
-| `SPRAY_STATUS_AFTER_MS`                      | `6000`      | Check scheduler status for receipts this late              |
-| `SPRAY_EXPIRY_AHEAD`, `SPRAY_EXPIRY_WINDOW`  | `30`, `20`  | First expiry 30 blocks ahead; 20 heights before waiting    |
-| `SPRAY_NONCES_PER_HEIGHT`                    | `7000`      | Per sender per height; the protocol limit is 8,000         |
-| `SPRAY_RPC_SOCKETS`                          | `12`        | Keep-alive sockets per lane (HTTPS endpoints only)         |
+| Binding                                      | Value       | Purpose                                                     |
+| -------------------------------------------- | ----------- | ----------------------------------------------------------- |
+| `SPRAY_WALLETS`                              | `24`        | Wallets in the ring; each adds ~7,000 transfers per block   |
+| `SPRAY_LANES`                                | `48`        | Lane objects; a multiple of `SPRAY_WALLETS`                 |
+| `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY`      | `256`, `96` | Starting settings; concurrency is divided between lanes     |
+| `SPRAY_OUTSTANDING`                          | `393216`    | Total in flight; covers 6–8 s receipts at Futurenet's limit |
+| `SPRAY_RATE`                                 | `0`         | Total sends per second across lanes; 0 sends unpaced        |
+| `SPRAY_POLL_CONCURRENCY`, `SPRAY_POLL_BATCH` | `8`, `1000` | Receipt lookups per lane; RPC arrays take up to 1,000       |
+| `SPRAY_PROBE_INTERVAL_MS`                    | `200`       | Poll one transfer per batch often, the rest after it lands  |
+| `SPRAY_RECEIPT_SAMPLE`                       | `1`         | Look up 1 in N; the rest settle from their batch's probe    |
+| `SPRAY_FIRST_POLL_RATIO`                     | `0.8`       | First poll near the average receipt delay                   |
+| `SPRAY_SUBMIT_RETRIES`                       | `2`         | Resend identical bytes only after a lost connection         |
+| `SPRAY_STATUS_AFTER_MS`                      | `6000`      | Check scheduler status for receipts this late               |
+| `SPRAY_EXPIRY_AHEAD`, `SPRAY_EXPIRY_WINDOW`  | `30`, `20`  | First expiry 30 blocks ahead; 20 heights before waiting     |
+| `SPRAY_NONCES_PER_HEIGHT`                    | `7000`      | Per sender per height; the protocol limit is 8,000          |
+| `SPRAY_RPC_SOCKETS`                          | `12`        | Keep-alive sockets per lane (HTTPS endpoints only)          |
 
-Values are the devnet defaults. A local node uses 4 wallets, 8 lanes, concurrency
+Values are the Futurenet defaults. A local node uses 4 wallets, 8 lanes, concurrency
 32, and 32,768 in flight. Shell variables with the same names override them at
 deploy time, and `SPRAY_WORKER_NAME` deploys a test copy beside the hosted app.
 
@@ -381,9 +373,9 @@ and a first-poll ratio between 0 and 2.
 
 ## Verified results
 
-### Hosted on Cloudflare, devnet (October 27, 2026)
+### Hosted on Cloudflare, Futurenet (October 27, 2026)
 
-Devnet 0.41.0, wire 14.1.1, with no other load. Failed and unresolved were 0 in
+Futurenet 0.41.0, wire 14.1.1, with no other load. Failed and unresolved were 0 in
 every row. Each wallet count used two lanes per wallet and 16,384 transfers in
 flight per wallet.
 
@@ -397,7 +389,7 @@ flight per wallet.
 | Hosted defaults, 180 s (7,919,872 transfers)       |          42,480 |       8.6 s |
 | Browser journey (mouse, keyboard, touch, controls) |          17,771 |       9.8 s |
 
-Past 24 wallets, more load adds only receipt delay: devnet sustains about 45k
+Past 24 wallets, more load adds only receipt delay: Futurenet sustains about 45k
 tx/s for this workload. Blocks carry 100,000–400,000 transfers and arrive every
 2.8–3.2 s.
 
@@ -419,9 +411,9 @@ hosted run:
 Most of the delay under load comes after commit: receipts reach the indexer about
 4 s after the scheduler reports the transfer committed.
 
-### Hosted on Cloudflare, devnet (October 20, 2026)
+### Hosted on Cloudflare, Futurenet (October 20, 2026)
 
-Devnet 0.29.2, wire 11.2.0, with no other load. Successful tx/s includes the drain
+Futurenet 0.29.2, wire 11.2.0, with no other load. Successful tx/s includes the drain
 after release; failed and unresolved were 0 in every row.
 
 | Configuration                                                 | Successful tx/s |
@@ -433,7 +425,7 @@ after release; failed and unresolved were 0 in every row.
 | 8 lanes, 1,000 / 16, 5-minute soak (3,540,000 transfers)      |          11,757 |
 | Browser journey (mouse, keyboard, touch, controls)            |          10,692 |
 
-While spraying, devnet blocks carry 25,000–41,000 transfers and stretch from
+While spraying, Futurenet blocks carry 25,000–41,000 transfers and stretch from
 2.0 s to 2.2–3.3 s, with 2.4–2.6 s receipt delays. 32,768 transfers in flight
 looked like saturation at the time; the October 27 runs show that four wallets
 were the limit. These are observations of this client on a shared network, not
@@ -443,7 +435,7 @@ Rendering, measured in Chromium on an Apple-silicon Mac (October 28): a local
 benchmark of the draw loop at 9,000–100,000 particles per second held 60 fps with
 WebGL (1–4 ms of CPU per frame), and Canvas 2D fell to 7–43 fps; with the CPU
 slowed 4× (a phone profile) Canvas 2D fell to 3–16 fps and WebGL still held 60.
-On the hosted app at devnet's limit, a 30-second drag ran at 57–61 fps, drew
+On the hosted app at Futurenet's limit, a 30-second drag ran at 57–61 fps, drew
 transfers at the confirmed rate (for example 44,903 per second as 8,980 particles),
 and kept 5,700 particles per second through a pause in submissions.
 
@@ -525,7 +517,7 @@ package and served from the app's origin. The font license is distributed at
 - **Funding fails:** the control panel shows the affected wallet and faucet error.
   Wait for any reported cooldown or restore faucet availability; setup retries.
   Existing funded wallets are reused.
-- **Network mismatch:** verify the endpoint and `THRUPUT_NETWORK`. A devnet
+- **Network mismatch:** verify the endpoint and `THRUPUT_NETWORK`. A Futurenet
   reset requires updating `THRUPUT_NETWORK_HASH` in `cloudflare.config.ts`.
 - **Fresh node:** restart `npm run dev` so the cached wallet clients and chain tip
   are rebuilt. The deterministic addresses are funded again on the fresh chain.
@@ -551,12 +543,12 @@ package and served from the app's origin. The font license is distributed at
 - `server/expiry.ts`: per-sender expiry heights within replay-cache capacity.
 - `server/socket-rpc.ts`: keep-alive JSON-RPC socket pool.
 - `server/signer.ts`: deterministic development signer using Web Crypto.
-- `server/network.ts`: Devnet/Localnet endpoints, identity pin, and SDK transport.
+- `server/network.ts`: Futurenet/Localnet endpoints, identity pin, and SDK transport.
 - `server/rpc.ts`: JSON-RPC batching, receipt and status validation.
 - `server/commands.ts`: runtime validation of browser control messages.
 - `shared/protocol.ts`: settings and telemetry types, with no browser SDK dependency.
 - `src/main.ts`: pointer/keyboard input, settings, and live UI.
 - `src/particles.ts`: bounded particle stream, release rate, and prediction.
 - `src/particle-renderers.ts`: WebGL renderer and the Canvas 2D fallback.
-- `scripts/deploy.sh`: devnet deploy that waits for every object to run the new version.
+- `scripts/deploy.sh`: Futurenet deploy that waits for every object to run the new version.
 - `SPEC.md`, `docs/`: original specification and records of the earlier Node app.

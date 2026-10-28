@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import WebSocket from "ws";
 import type { ServerMessage, Snapshot } from "../shared/protocol.js";
 
-// Two browsers share one experiment; only one may spray. Sprays briefly on devnet.
+// Two browsers share one experiment; only one may spray. Sprays briefly on Futurenet.
 const url = process.env.APP_URL ?? "http://127.0.0.1:5177";
 const state = async (): Promise<Snapshot> =>
   (await fetch(`${url}/api/state`)).json() as Promise<Snapshot>;

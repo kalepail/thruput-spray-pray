@@ -3,10 +3,10 @@ import type { SprayPray } from "./coordinator.js";
 import type { Host } from "./host.js";
 import type { SprayLane } from "./lane.js";
 
-// Bump to choose new objects, for example after the devnet RPC moves.
+// Bump to choose new objects, for example after the Futurenet RPC moves.
 const LAYOUT_KEY = "lanes-v1";
 const COORDINATOR_KEY = "coordinator-v1";
-// Lanes this close to the RPC are beside devnet (SEA or PDX for AWS us-west-2).
+// Lanes this close to the RPC are beside Futurenet (SEA or PDX for AWS us-west-2).
 const NEAR_RPC_MS = 15;
 const MAX_CANDIDATES = 64;
 

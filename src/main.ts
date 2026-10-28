@@ -244,16 +244,16 @@ function update(snapshot: Snapshot): void {
   element("network-label").textContent = state.network;
   const status = element("status");
   status.dataset.phase = state.phase;
-  // At devnet's limit the in-flight cap stays full while spraying; that is the
+  // At Futurenet's limit the in-flight cap stays full while spraying; that is the
   // expected state, not a fault. Keep the line for a moment after the cap frees up,
   // so it does not flicker between blocks.
   if (state.backpressure && spraying) atCapacityUntil = Date.now() + 3_000;
   const message =
     spraying && Date.now() < atCapacityUntil
-      ? "Devnet is at capacity. New transfers go out as blocks confirm; none are dropped."
+      ? "Futurenet is at capacity. New transfers go out as blocks confirm; none are dropped."
       : state.message;
   if (status.textContent !== message) status.textContent = message;
-  // The first block takes 4-10 s to confirm completely at devnet's limit. Until
+  // The first block takes 4-10 s to confirm completely at Futurenet's limit. Until
   // then the headline shows sends since the spray started, labelled as such,
   // instead of a zero that looks broken. Like the confirmed rate, it divides by at
   // least 10 s: the in-flight cap lets ~400k go out in the first 2 s, and then sends

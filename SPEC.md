@@ -9,7 +9,7 @@ complete. See `README.md` for operation and `docs/verification.md` for results.
 
 ## Goal
 
-A browser playground for real Groundhog / Thruput ERC20 transfers. Hold and drag
+A browser playground for real Thruput ERC20 transfers. Hold and drag
 to spray colorful transaction particles. A Node server signs and submits the
 work; the browser handles input, rendering, and live telemetry.
 
@@ -22,13 +22,13 @@ work; the browser handles input, rendering, and live telemetry.
   acts as sender and receiver. This exercises actual token balances.
 - Derive repeatable, public development keys from a fixed experiment seed on the
   server. No wallet connection or browser signing. These keys hold test HOG only.
-- Default to Devnet at `https://rpc.thruput.network`, with the verified network
-  identity pinned. Provision the wallet pool through the Devnet faucet and
+- Default to Futurenet at `https://rpc.thruput.network`, with the verified network
+  identity pinned. Provision the wallet pool through the Futurenet faucet and
   verify funding before enabling the canvas. Localnet remains an explicit option.
-- Set the pool size per deployment with `SPRAY_WALLETS`: 24 on devnet, 4 on a
+- Set the pool size per deployment with `SPRAY_WALLETS`: 24 on Futurenet, 4 on a
   local node. Each sender may use about 7,000 nonces per expiry height, so the
   sustained rate is bounded by about 7,000 transfers per wallet per block. Four
-  wallets capped devnet near 12k tx/s; 24 wallets reach devnet's own limit of
+  wallets capped Futurenet near 12k tx/s; 24 wallets reach Futurenet's own limit of
   about 45k tx/s. Expose only batch size and concurrent submission requests as
   advanced load controls.
 - Bounded live pipeline: sign fresh batches, submit concurrent JSON-RPC batches,

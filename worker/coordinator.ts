@@ -36,7 +36,7 @@ const INDEX_LAG_MS = 15_000;
 // How often the chain tip is read.
 const TIP_READ_MS = 250;
 // The headline averages over this much commit time, about one fill-and-wait cycle
-// of the in-flight cap at devnet's limit.
+// of the in-flight cap at Futurenet's limit.
 const RATE_WINDOW_MS = 10_000;
 const LANE_CONFIGURE_MS = 120_000;
 function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
@@ -354,7 +354,7 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
-   * A lane submitted a batch. Batches arrive about 350 times a second at devnet's
+   * A lane submitted a batch. Batches arrive about 350 times a second at Futurenet's
    * limit, and each broadcast goes to every browser on this one thread, so batches
    * merge into one burst per PARTICLE_FLUSH_MS, drawn where the pointer is then.
    * Browsers draw each burst along the path from the previous one, so the trail still
@@ -515,7 +515,7 @@ export class SprayPray extends DurableObject<Env> {
       errors: errors.slice(-8),
       network:
         lanes[0]?.network ??
-        (this.env.THRUPUT_NETWORK === "devnet" ? "Devnet" : "Localnet"),
+        (this.env.THRUPUT_NETWORK === "futurenet" ? "Futurenet" : "Localnet"),
       addresses: lanes[0]?.addresses ?? [],
     };
   }

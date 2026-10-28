@@ -5,21 +5,21 @@ import { networkConfig, networkTransport } from "../server/network.js";
 
 const HASH = "6RgqYi69r94rCG1qKZ5NfCMAxonNAMXbDsFZMgGwgP2J";
 
-test("Explicit Devnet retains its endpoint and verified signing identity", () => {
+test("Explicit Futurenet retains its endpoint and verified signing identity", () => {
   const config = networkConfig({
-    THRUPUT_NETWORK: "devnet",
+    THRUPUT_NETWORK: "futurenet",
     THRUPUT_NETWORK_HASH: HASH,
   });
   assert.equal(config.rpcUrl, "https://rpc.thruput.network");
-  assert.equal(config.name, "Devnet");
+  assert.equal(config.name, "Futurenet");
   assert.equal(config.cluster.rpcUrl, config.rpcUrl);
   assert.equal(toBase58(config.cluster.networkHash!), HASH);
   assert.deepEqual(config.cluster.capabilities, ["airdrop"]);
 });
 
-test("Devnet requires its identity because wipes change it", () => {
+test("Futurenet requires its identity because wipes change it", () => {
   assert.throws(
-    () => networkConfig({ THRUPUT_NETWORK: "devnet" }),
+    () => networkConfig({ THRUPUT_NETWORK: "futurenet" }),
     /THRUPUT_NETWORK_HASH/,
   );
 });
@@ -33,20 +33,20 @@ test("Localnet is the default and retains its zero network identity", () => {
 
 test("RPC overrides retain the selected network pin", () => {
   const config = networkConfig({
-    THRUPUT_NETWORK: "devnet",
+    THRUPUT_NETWORK: "futurenet",
     THRUPUT_NETWORK_HASH: HASH,
-    THRUPUT_RPC_URL: "https://devnet-proxy.example",
+    THRUPUT_RPC_URL: "https://futurenet-proxy.example",
   });
-  assert.equal(config.cluster.rpcUrl, "https://devnet-proxy.example");
-  assert.equal(config.name, "Devnet");
+  assert.equal(config.cluster.rpcUrl, "https://futurenet-proxy.example");
+  assert.equal(config.name, "Futurenet");
   assert.deepEqual(
     config.cluster.networkHash,
-    networkConfig({ THRUPUT_NETWORK: "devnet", THRUPUT_NETWORK_HASH: HASH })
+    networkConfig({ THRUPUT_NETWORK: "futurenet", THRUPUT_NETWORK_HASH: HASH })
       .cluster.networkHash,
   );
   assert.throws(
     () => networkConfig({ THRUPUT_NETWORK: "mainnet" }),
-    /devnet or localnet/,
+    /futurenet or localnet/,
   );
 });
 

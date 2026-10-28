@@ -1,5 +1,5 @@
 import {
-  devnet,
+  futurenet,
   localnet,
   hashFromBase58,
   HttpTransport,
@@ -14,18 +14,18 @@ export interface NetworkEnv {
 
 export function networkConfig(env: NetworkEnv) {
   const network = env.THRUPUT_NETWORK ?? "localnet";
-  if (network !== "devnet" && network !== "localnet")
-    throw new Error("THRUPUT_NETWORK must be devnet or localnet");
+  if (network !== "futurenet" && network !== "localnet")
+    throw new Error("THRUPUT_NETWORK must be futurenet or localnet");
   const rpcUrl =
     env.THRUPUT_RPC_URL ??
-    (network === "devnet"
+    (network === "futurenet"
       ? "https://rpc.thruput.network"
       : "http://127.0.0.1:9545");
-  if (network === "devnet" && !env.THRUPUT_NETWORK_HASH)
-    throw new Error("THRUPUT_NETWORK_HASH is required for devnet");
+  if (network === "futurenet" && !env.THRUPUT_NETWORK_HASH)
+    throw new Error("THRUPUT_NETWORK_HASH is required for futurenet");
   const cluster =
-    network === "devnet"
-      ? devnet({
+    network === "futurenet"
+      ? futurenet({
           rpcUrl,
           networkHash: networkHash(hashFromBase58(env.THRUPUT_NETWORK_HASH!)),
         })
@@ -33,7 +33,7 @@ export function networkConfig(env: NetworkEnv) {
   return {
     rpcUrl,
     cluster,
-    name: network === "devnet" ? "Devnet" : "Localnet",
+    name: network === "futurenet" ? "Futurenet" : "Localnet",
   };
 }
 export type NetworkConfig = ReturnType<typeof networkConfig>;

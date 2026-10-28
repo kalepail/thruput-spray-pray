@@ -3,7 +3,7 @@
  *
  * A sender's replay cache accepts at most 8,000 unexpired nonces per expiry height
  * (`kReplayCacheNoncesMaxLen`); more fail as a two-phase-commit capacity conflict that
- * devnet reports as `retry`. Resending cannot help, because the height stays full
+ * Futurenet reports as `retry`. Resending cannot help, because the height stays full
  * until it expires. Each sender therefore fills one height up to `perHeight`, then
  * moves to the next, and never returns to a height it already used. Every new block
  * opens one more height inside the window, which bounds the sustained rate at about
@@ -41,7 +41,7 @@ export function expiryAllocator(options: ExpiryOptions) {
         // After a restart, the previous instance's last height may still be filling.
         const resumed = options.resume?.(sender);
         // A stored height past the usable window means the chain was reset (a fresh
-        // local node or a devnet wipe); waiting for it would stall forever.
+        // local node or a Futurenet wipe); waiting for it would stall forever.
         if (
           resumed !== undefined &&
           resumed + slots > floor &&

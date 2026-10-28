@@ -47,7 +47,7 @@ const { networkHash } = await rpc<{ networkHash: string }>(
   {},
 );
 const config = networkConfig({
-  THRUPUT_NETWORK: "devnet",
+  THRUPUT_NETWORK: "futurenet",
   THRUPUT_RPC_URL: rpcUrl,
   THRUPUT_NETWORK_HASH: networkHash,
 });

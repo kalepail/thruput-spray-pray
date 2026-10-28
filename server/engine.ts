@@ -579,7 +579,7 @@ export class Engine {
         }
       });
       if (resend.length) {
-        // Devnet answers a duplicate of an admitted transfer with the same hash, so a
+        // Futurenet answers a duplicate of an admitted transfer with the same hash, so a
         // rejection here is real.
         const outcomes = await this.chain.submit(
           resend.map((item) => item.operation),

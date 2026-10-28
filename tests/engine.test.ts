@@ -152,7 +152,7 @@ test("opt-in resend repeats identical bytes after a lost connection", async (t) 
           failedOnce.add(key);
           throw new TypeError("fetch failed");
         }
-        // Devnet answers a duplicate of an admitted transfer with the same hash.
+        // Futurenet answers a duplicate of an admitted transfer with the same hash.
         return ops.map(() => "accepted");
       },
     },
