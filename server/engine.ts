@@ -309,7 +309,7 @@ export class Engine {
         .reduce((n, s) => n + s.sent, 0),
       recentBlocks: [...this.blockCounts]
         .sort(([a], [b]) => (BigInt(a) < BigInt(b) ? -1 : 1))
-        .slice(-5)
+        .slice(-16)
         .map(([height, succeeded]) => ({ height, succeeded })),
       averageTps: elapsedMs ? (this.counts.succeeded * 1000) / elapsedMs : 0,
       averageTxPerBlock: this.successfulBlocks.size

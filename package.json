@@ -16,6 +16,7 @@
     "test:browser": "tsx scripts/test-browser.ts",
     "test:load": "tsx scripts/test-load.ts",
     "test:latency": "tsx scripts/receipt-latency.ts",
+    "test:headline": "tsx scripts/test-headline.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm test && npm run format:check && npm run build",

@@ -321,7 +321,7 @@ test("HTTP errors are not resent", async (t) => {
   assert.equal(calls, 2);
 });
 
-test("recent blocks keep the latest five heights in numeric order", async (t) => {
+test("recent blocks keep the latest 16 heights in numeric order", async (t) => {
   let height = 0;
   const engine = fixture({
     async poll(ops) {
@@ -344,8 +344,11 @@ test("recent blocks keep the latest five heights in numeric order", async (t) =>
   engine.stop("a");
   await waitFor(() => engine.snapshot().phase === "ready");
   const heights = engine.snapshot().recentBlocks.map((block) => block.height);
-  assert.equal(heights.length, 5);
-  assert.deepEqual(heights, ["113", "114", "115", "116", "117"]);
+  assert.equal(heights.length, 16);
+  assert.deepEqual(
+    heights,
+    Array.from({ length: 16 }, (_, i) => String(102 + i)),
+  );
 });
 
 test("receipt deadline is unresolved, lease expiration stops generation", async (t) => {

@@ -33,9 +33,11 @@ const STALL_MS = 6_000;
 // While blocks still commit, receipts can lag this long under load before the rate
 // is taken as stalled.
 const INDEX_LAG_MS = 15_000;
-// How often the chain tip is read. Under load the index stores blocks ~10 s late,
-// but the tip comes from the state database and does not lag.
+// How often the chain tip is read.
 const TIP_READ_MS = 250;
+// The headline averages over this much commit time, about one fill-and-wait cycle
+// of the in-flight cap at devnet's limit.
+const RATE_WINDOW_MS = 10_000;
 const LANE_CONFIGURE_MS = 120_000;
 function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -76,9 +78,6 @@ export class SprayPray extends DurableObject<Env> {
   private cursors: number[] = [];
   /** When each block height with our transfers was first reported by any lane. */
   private seen = new Map<string, number>();
-  /** Chain start time of each seen height, in ms, read with getBlockByHeight. */
-  private timepoints = new Map<string, number>();
-  private timepointReads = new Set<string>();
   private sprayStartedAt = 0;
   /** The chain tip; with nothing pending, it lets the rate fall to zero. */
   private tip = 0n;
@@ -266,51 +265,11 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
-   * Reads a block's chain time once. Receipts reach us at polling time, which jitters
-   * the interval between blocks; the chain time does not. A block the index has not
-   * stored yet is read again on a later tick.
-   */
-  private async readTimepoint(height: string): Promise<void> {
-    if (this.timepoints.has(height) || this.timepointReads.has(height)) return;
-    this.timepointReads.add(height);
-    try {
-      const response = await fetch(String(this.env.THRUPUT_RPC_URL), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getBlockByHeight",
-          params: { blockHeight: height },
-        }),
-        signal: AbortSignal.timeout(LANE_CALL_MS),
-      });
-      const body = (await response.json()) as {
-        result?: { blockTimepoint?: string } | null;
-      };
-      const nanos = body.result?.blockTimepoint;
-      if (nanos)
-        this.timepoints.set(height, Number(BigInt(nanos) / 1_000_000n));
-    } catch {
-      // Read again on a later tick.
-    } finally {
-      this.timepointReads.delete(height);
-    }
-  }
-
-  /**
-   * Reads the chain times the block rate needs: the blocks around the frontier, and,
-   * every 250 ms, the chain tip.
+   * Reads the chain tip every 250 ms and notes when each block commits. The index
+   * stores blocks ~10 s late under load, so `getBlockByHeight` cannot time the
+   * newest ones; the tip comes from the state database and does not lag.
    */
   private readChainTimes(): void {
-    const window = this.rateWindow(this.pendingNow());
-    const frontier = window?.last;
-    if (window)
-      for (let h = window.first; h <= window.last + 1n; h++)
-        if (h > 0n) void this.readTimepoint(String(h));
-    for (const height of [...this.timepoints.keys()])
-      if (frontier !== undefined && BigInt(height) < frontier - 8n)
-        this.timepoints.delete(height);
     if (Date.now() - this.tipReadAt > TIP_READ_MS) {
       this.tipReadAt = Date.now();
       void fetch(String(this.env.THRUPUT_RPC_URL), {
@@ -423,50 +382,21 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
-   * The blocks the headline counts: the frontier and the block before it, but none
-   * from before this spray's first block. While that first block is the only one
-   * reported, it is counted alone, before the next block confirms it complete. Its
-   * receipts are still arriving then, so the first value can start low and rise;
-   * waiting for the next block's receipts added about 3.5 s at devnet's limit.
-   */
-  private rateWindow(
-    pending: number,
-  ): { first: bigint; last: bigint } | undefined {
-    let first: bigint | undefined;
-    for (const [height, seenAt] of this.seen)
-      if (
-        seenAt >= this.sprayStartedAt &&
-        (first === undefined || BigInt(height) < first)
-      )
-        first = BigInt(height);
-    // Sending, but no block of this spray reported yet: the rate is not known.
-    if (pending > 0 && this.owner && first === undefined) return undefined;
-    let last = this.frontier(pending);
-    if (
-      pending > 0 &&
-      first !== undefined &&
-      (last === undefined || last < first)
-    )
-      last = first;
-    if (last === undefined || last < 2n) return undefined;
-    const start = last - 1n;
-    return {
-      first: first !== undefined && first > start ? first : start,
-      last,
-    };
-  }
-
-  /**
-   * Confirmed transfers per second over the last two complete chain blocks: our
-   * successful transfers in those blocks divided by their chain time. Blocks are
-   * taken by chain height, so a block with none of our transfers counts as zero and
-   * the rate falls to zero within two blocks after confirmations stop. Receipts
-   * arrive in block-sized lumps (100k or more every ~3 s at devnet's limit), so a
-   * shorter time window would swing with block timing.
+   * Confirmed transfers per second over the last RATE_WINDOW_MS: our successful
+   * transfers in complete blocks that committed in that window, divided by the time
+   * the chain took to commit them (from the commit of the block before the oldest
+   * one), and never by less than the window. Commit times are when this object saw
+   * each block become the chain tip, so one clock times both ends; a tip read of
+   * margin is added. Blocks whose receipts are still arriving are not counted.
+   *
+   * Our transfers reach the chain in a cycle: loaded blocks of 100k-230k (55k-65k
+   * tx/s each) while the in-flight cap fills, then nearly empty blocks while it
+   * waits for receipts. The two-block rate this replaces reported the loaded pairs,
+   * up to 73k tx/s while the spray sustained ~45k; the window spans a whole cycle.
    */
   private blockRate(counts: Map<string, number>, pending: number): number {
-    const window = this.rateWindow(pending);
-    if (window === undefined) return 0;
+    const frontier = this.frontier(pending);
+    if (frontier === undefined) return 0;
     // Nothing reported for a while although transfers are pending: none confirm now.
     // While blocks still commit, the index may only be late (~10 s under load).
     const quiet = Date.now() - Math.max(0, ...this.seen.values());
@@ -478,25 +408,33 @@ export class SprayPray extends DurableObject<Env> {
       (!committing || quiet > INDEX_LAG_MS)
     )
       return 0;
-    // A block's time point is when it starts, and its work fills the time until the
-    // next one starts: blocks f-1 and f run from the start of f-1 to the start of f+1.
-    let start = this.timepoints.get(String(window.first));
-    let end = this.timepoints.get(String(window.last + 1n));
-    // Under load the index stores block f+1 as late as its receipts. Until then, use
-    // when this object saw blocks commit: a block starts once the one before it is
-    // the tip. This is within one tip read (250 ms) of the chain time.
-    if (end === undefined || start === undefined) {
-      start = this.tipSeenAt.get(String(window.first - 1n));
-      end = this.tipSeenAt.get(String(window.last));
-    }
-    // Until both times are known, keep the last value.
-    if (end === undefined || start === undefined || end <= start)
-      return this.lastRate;
+    const end = this.tipSeenAt.get(String(frontier));
+    // Until this object has seen the frontier commit, keep the last value.
+    if (end === undefined) return this.lastRate;
     let confirmed = 0;
-    for (let h = window.first; h <= window.last; h++)
-      confirmed += counts.get(String(h)) ?? 0;
-    this.lastRate = (confirmed * 1000) / (end - start);
+    let start = end;
+    for (const [height, committedAt] of this.tipSeenAt) {
+      if (BigInt(height) > frontier || committedAt <= end - RATE_WINDOW_MS)
+        continue;
+      confirmed += counts.get(height) ?? 0;
+      // The oldest counted block's work began when the block before it committed.
+      const before = this.committedBefore(BigInt(height));
+      if (before !== undefined && before < start) start = before;
+    }
+    const span = Math.max(end - start, RATE_WINDOW_MS) + TIP_READ_MS;
+    this.lastRate = (confirmed * 1000) / span;
     return this.lastRate;
+  }
+
+  /** When the newest block below `height` was seen to commit; earlier if one was missed. */
+  private committedBefore(height: bigint): number | undefined {
+    let found: { height: bigint; at: number } | undefined;
+    for (const [h, at] of this.tipSeenAt) {
+      const value = BigInt(h);
+      if (value < height && (found === undefined || value > found.height))
+        found = { height: value, at };
+    }
+    return found?.at;
   }
 
   snapshot(): Snapshot {
@@ -561,7 +499,7 @@ export class SprayPray extends DurableObject<Env> {
       sendingTps: sum((s) => s.sendingTps),
       recentBlocks: [...byHeight]
         .sort(([a], [b]) => (BigInt(a) < BigInt(b) ? -1 : 1))
-        .slice(-5)
+        .slice(-16)
         .map(([height, count]) => ({ height, succeeded: count })),
       averageTps: elapsedMs ? (succeeded * 1000) / elapsedMs : 0,
       averageTxPerBlock: this.blocks.size ? succeeded / this.blocks.size : 0,
@@ -641,7 +579,6 @@ export class SprayPray extends DurableObject<Env> {
     );
     this.blocks.clear();
     this.seen.clear();
-    this.timepoints.clear();
     this.lastRate = 0;
     this.errors = [];
     this.cursors = [];

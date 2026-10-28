@@ -37,6 +37,8 @@ let dirty = false;
 const history: number[] = [];
 /** True once this spray has a confirmed rate; until then the headline shows sends. */
 let confirmedThisSpray = false;
+/** The headline's averaging time, as in the coordinator. */
+const RATE_WINDOW_MS = 10_000;
 /** When this browser first saw the current spray, and the attempts counted then. */
 let sprayStart: { time: number; attempted: number } | null = null;
 /** The HUD graph: confirmed and sent rates for the last 60 seconds. */
@@ -251,10 +253,11 @@ function update(snapshot: Snapshot): void {
       ? "Devnet is at capacity. New transfers go out as blocks confirm; none are dropped."
       : state.message;
   if (status.textContent !== message) status.textContent = message;
-  // The first receipts take ~10 s at devnet's limit. Until then the headline shows
-  // the average send rate since the spray started, labelled as such, instead of a
-  // zero that looks broken. The 5 s send rate falls to 0 before then, because sends
-  // wait at the in-flight cap.
+  // The first block takes 4-10 s to confirm completely at devnet's limit. Until
+  // then the headline shows sends since the spray started, labelled as such,
+  // instead of a zero that looks broken. Like the confirmed rate, it divides by at
+  // least 10 s: the in-flight cap lets ~400k go out in the first 2 s, and then sends
+  // wait for receipts, so a shorter time would report a rate the spray cannot keep.
   if (!spraying) {
     confirmedThisSpray = false;
     sprayStart = null;
@@ -265,12 +268,12 @@ function update(snapshot: Snapshot): void {
   const sendingFirst = spraying && !confirmedThisSpray;
   const sentRate = sprayStart
     ? ((state.attempted - sprayStart.attempted) * 1000) /
-      Math.max(Date.now() - sprayStart.time, 1000)
+      Math.max(Date.now() - sprayStart.time, RATE_WINDOW_MS)
     : 0;
   const label = sendingFirst ? "SENDING TX / SEC" : "CONFIRMED TX / SEC";
   const note = sendingFirst
     ? "Waiting for the first block to confirm"
-    : "Last 2 confirmed blocks";
+    : "Confirmed in the last 10 s";
   if (element("rate-label").textContent !== label)
     element("rate-label").textContent = label;
   if (element("rate-note").textContent !== note)

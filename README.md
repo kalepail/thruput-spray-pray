@@ -191,51 +191,59 @@ cap device-pixel ratio at 2; WebGL uses a **160,000-particle** pool, Canvas 2D a
 
 ## Reading the numbers
 
-| Metric                | Meaning                                                                           |
-| --------------------- | --------------------------------------------------------------------------------- |
-| Attempted             | Signed transactions handed to submission                                          |
-| Accepted              | RPC admission acknowledged with the expected transaction hash                     |
-| Successful            | Committed receipts with successful execution                                      |
-| Failed                | Explicit submission rejection or failed execution                                 |
-| Unresolved            | No terminal receipt within the 60-second observation deadline                     |
-| Pending               | Attempted minus successful, failed, and unresolved                                |
-| Confirmed tx/sec      | Successful transfers in the last two completed blocks / their chain interval      |
-| Average confirmed/sec | Successful receipts / active experiment time, including signing and receipt drain |
-| Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window   |
-| Sending               | Attempts per second over five seconds while spraying; the last second after it    |
+| Metric                | Meaning                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| Attempted             | Signed transactions handed to submission                                           |
+| Accepted              | RPC admission acknowledged with the expected transaction hash                      |
+| Successful            | Committed receipts with successful execution                                       |
+| Failed                | Explicit submission rejection or failed execution                                  |
+| Unresolved            | No terminal receipt within the 60-second observation deadline                      |
+| Pending               | Attempted minus successful, failed, and unresolved                                 |
+| Confirmed tx/sec      | Successful transfers in complete blocks committed in the last 10 s / at least 10 s |
+| Average confirmed/sec | Successful receipts / active experiment time, including signing and receipt drain  |
+| Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window    |
+| Sending               | Attempts per second over five seconds while spraying; the last second after it     |
 
-Receipts arrive in block-sized lumps: under load a block carries 100,000–230,000
-of these transfers, so any short time window swings with block timing. The
-headline therefore measures completed blocks, timed by the chain's own block
-times (`getBlockByHeight`), not by when receipts reached the app. A block's time
-point is when it starts, and its work runs until the next block starts, so the
-two blocks `f-1` and `f` are divided by `start(f+1) - start(f-1)`. Block `f` is
-the newest block whose receipts are all in. While transfers are pending, that is
-the newest block the coordinator saw commit (it reads the chain tip every 250 ms)
-before the oldest waiting transfer was sent, so no waiting transfer can be in it;
-waiting transfers sent more than 20 s ago are left out. With nothing pending, it
-is the block before the chain tip. Blocks from before the spray are not counted.
+The headline must never report more than the chain did. Our transfers reach the
+chain in a cycle: the 393,216 in-flight cap fills in about 2 s, those transfers
+land in two or three blocks of 100,000–290,000, and sends then wait for receipts
+while nearly empty blocks commit. One loaded block alone is 55k–65k tx/s, and the
+earlier two-block headline showed up to 73k tx/s in a spray that sustained
+~45k. The headline therefore averages over 10 s of commit time, about one cycle.
 
-Under load the index stores each block about as late as its receipts, so
-`getBlockByHeight` cannot time the newest blocks. Until it can, the coordinator
-uses the times it saw each block become the chain tip, which are within one tip
-read of the chain's times. The spray's first block is counted as soon as its
-first receipts arrive, so the headline rises while they come in. Before that,
-the headline shows the average send rate since the spray started, labelled
-"SENDING TX / SEC". If transfers are pending but no new block is reported for
-6 s, the headline shows 0; while blocks still commit, it keeps its value for up
-to 15 s, because the index can be that late.
+It counts our successful transfers in complete blocks that committed in the last
+10 s, and divides by the time the chain took to commit them (from the commit of
+the block before the oldest one), but never by less than 10 s, plus 250 ms for
+tip-read jitter. Commit times are when the coordinator saw each block become the
+chain tip: it reads `getChainTip` every 250 ms, and one clock times both ends.
+`getBlockByHeight` is not used, because the index stores blocks about as late as
+their receipts (~10 s under load). A block is complete when it committed before
+the oldest waiting transfer was sent (waiting transfers sent more than 20 s ago
+are left out), so no waiting transfer can be in it; with nothing pending, every
+block up to the one before the tip is complete. Incomplete blocks are not
+counted, so missing receipts can only make the number low.
 
-Measured on the hosted app with a 20 s browser hold (October 28): the send rate
-showed after 1 s, and the confirmed rate took over 3.6–6.1 s after the click.
-Before this, the headline stayed at 0 for 14 s and then fell to a few hundred
-for several seconds.
+Until the spray's first block is complete, the headline shows the transfers sent
+since the spray started, divided by at least 10 s, labelled "SENDING TX / SEC".
+Without that floor it read 105k at 2 s, because the cap lets ~400k go out at once.
+If transfers are pending but no new block is reported for 6 s, the headline shows
+0; while blocks still commit, it keeps its value for up to 15 s, because the
+index can be that late. After a release it falls to 0 over 10 s.
 
-The number is exact for those blocks, but it is not smooth, because the load the
-chain sees is not smooth. Starting from idle, the 393,216 in-flight cap fills in
-about 3 s, those transfers land in one or two blocks of ~200,000, and sends then
-wait for receipts. A 1-second tap sends ~110,000 transfers, which land in one
-block. Successive two-block rates during one long hold measured 15k–55k tx/s.
+`npm run test:headline` checks this against the chain. It sprays with random
+holds (0.3–8 s) and gaps (0.5–6 s), then compares every headline value with the
+best 10 s rate the chain gave our transfers, timed by `getBlockByHeight`. Three
+120 s runs on the hosted app (October 28) passed:
+
+| Seed   | Sprays | Transfers | Chain best 10 s | Headline max | Sending max |
+| ------ | -----: | --------: | --------------: | -----------: | ----------: |
+| 579565 |     16 | 3,894,271 |          47,697 |       41,655 |      28,518 |
+| 766568 |     18 | 4,257,709 |        ≥ 50,916 |       51,422 |      39,322 |
+| 971359 |     17 | 4,822,784 |          53,046 |       46,138 |      40,627 |
+
+The second run used a stricter truth (10 s or longer runs only), which the
+headline exceeded by 1.0% within the test's 3% clock margin; the corrected truth
+divides shorter runs by 10 s and is at least as high.
 
 The headline also trails the chain. At light load a block's receipts are all
 counted about 1 s after it commits; with ~300,000 in flight it takes 5–7 s,
@@ -478,6 +486,7 @@ npm run test:live      # Real local receipts and exact recipient balance delta
 npm run test:browser   # Mouse, keyboard, touch, controls, lifecycle; app required
 npm run test:load      # 10-second run against the running app's selected network
 npm run test:latency   # Times one transfer per second through commit and receipt
+npm run test:headline  # Random holds and gaps; the headline never exceeds the chain
 npm run test:lease     # A second browser is refused; the lease passes on release
 npm run test:security  # Public endpoints, cross-origin WebSocket, same-origin font
 npm run watch:blocks   # Records each block period and size; WATCH_SECONDS, WATCH_OUTPUT
