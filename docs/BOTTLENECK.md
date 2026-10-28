@@ -71,6 +71,19 @@ bigger blocks. This points at the path into the chain (the one gateway, admissio
 signature checks) more than at block execution. The node metrics in "Next tests" can
 confirm this.
 
+## Upstream benchmark for comparison
+
+`groundhogchain/metrics_history` (sparse clone at `../metrics_history`) stores hogd CI
+benchmarks. On 2026-10-28 (hogd `7f471b9f6`), `schedgateway_stress_batches` submitted
+1,944,400 native-token transfers in 10 s, about 194k tx/s, straight to the scheduler. That
+run used 8 connections, batches of 100, 1,000 accounts, and 500 ms blocks. One connection
+with one call in flight (`schedgateway_submit_c1`) gave about 3.4k tx/s at 279 us p50.
+
+Devnet stops at about 45k tx/s through the public JSON-RPC gateway. The scheduler alone
+takes about 4x more in CI. So the gap is most likely in the public gateway, in the devnet
+host setup, or in how few accounts we use (24 or 48, against 1,000). The two-source test
+used 48 accounts and got a lower rate, so account count alone does not explain the gap.
+
 ## Next tests
 
 1. Chain metrics during a 45k soak, from the devnet team: `submit_unvetted_duration_seconds`,
@@ -81,7 +94,9 @@ confirm this.
 2. Workload changes with one source: a lower declared gas than 100,000, a custom ERC20 in
    place of the native token, and unique receivers in place of the ring.
 3. Receipts sampled at 1 in 1,000, to take read load off the indexer.
-4. AWS senders in us-west-2: test 1 shows no sender limit, so skip this for throughput.
+4. Ask the devnet team how the public gateway (`thruput-tools`) submits to the scheduler:
+   one transfer per call or batches, and how many connections.
+5. AWS senders in us-west-2: test 1 shows no sender limit, so skip this for throughput.
 
 ## Commands
 
