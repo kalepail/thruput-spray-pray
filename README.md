@@ -325,8 +325,8 @@ tx/s for this workload. Blocks carry 100,000–400,000 transfers and arrive ever
 2.8–3.2 s.
 
 `npm run test:latency` sends one marked transfer per second from its own wallet
-and times each step. Beside the 180-second hosted run, from a workstation on the
-US West Coast:
+and times each step from the machine that runs it. Beside the 180-second
+hosted run:
 
 | Step                                  | Idle p50 | Under load p50 | Under load p90 |
 | ------------------------------------- | -------: | -------------: | -------------: |
