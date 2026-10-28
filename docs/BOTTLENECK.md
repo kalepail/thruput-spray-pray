@@ -71,6 +71,41 @@ bigger blocks. This points at the path into the chain (the one gateway, admissio
 signature checks) more than at block execution. The node metrics in "Next tests" can
 confirm this.
 
+## Test 2: transaction cost and declared gas
+
+Each transaction is `DefaultWallet.execute` on the sender's account (root gas limit
+500,000) with one call to the native token's `ERC20.transfer` (gas limit 100,000). It
+signs to 316 bytes. Scheduling reserves one native-token base unit per unit of declared
+root gas, not gas used, so each transfer reserves 0.05 HOG of a wallet's ~1,000 HOG while
+it waits.
+
+`simulateInvocation` on devnet 0.41.0 (read-only):
+
+| Root call                                  | Gas used | Signed bytes |
+| ------------------------------------------ | -------- | ------------ |
+| `execute` with one transfer (what we send) | 38,051   | 316          |
+| `execute` with one `totalSupply` read      | 37,701   | ~300         |
+| `execute` with 16 transfers                | 47,816   | 1,484        |
+
+About 37,700 gas is a fixed cost of any call into a native contract; a transfer adds only
+about 350 gas. No other call is materially cheaper, so the workload is already as light as
+one transaction can be. Batching 16 transfers into one `execute` would raise transfers per
+second, not transactions per second, so the app keeps one transfer per transaction.
+
+A/B of the declared gas, test Worker `thruput-spray-pray-gas` (seed
+`spray-and-pray/bottleneck-b/v1`, since deleted), 24 wallets, 48 lanes, 393,216 in flight,
+60 s each, run in the order below:
+
+| Run | Root / transfer gas | Steady tx/s | Block period | Failed / unresolved |
+| --- | ------------------- | ----------- | ------------ | ------------------- |
+| A1  | 500,000 / 100,000   | 41,748      | 2.86 s       | 0 / 0               |
+| B1  | 50,000 / 45,000     | 45,057      | 2.87 s       | 0 / 0               |
+| A2  | 500,000 / 100,000   | 45,035      | 2.81 s       | 0 / 0               |
+| B2  | 50,000 / 45,000     | 45,033      | 2.78 s       | 0 / 0               |
+
+A1 was the first run after a deploy. **Conclusion:** the declared gas does not limit tx/s.
+50,000 / 45,000 is safe if a lower reservation is ever wanted, but it gains nothing now.
+
 ## Upstream benchmark for comparison
 
 `groundhogchain/metrics_history` (sparse clone at `../metrics_history`) stores hogd CI
@@ -91,8 +126,8 @@ used 48 accounts and got a lower rate, so account count alone does not explain t
    `nomination_duration_seconds`, `block_period_seconds`,
    `scheduler_global_lock_hold_seconds`, `validation_duration_seconds`,
    `commit_duration_seconds`, and CPU for each thread.
-2. Workload changes with one source: a lower declared gas than 100,000, a custom ERC20 in
-   place of the native token, and unique receivers in place of the ring.
+2. Workload changes with one source: a custom ERC20 in place of the native token, and
+   unique receivers in place of the ring. (Lower declared gas: done, no change; see Test 2.)
 3. Receipts sampled at 1 in 1,000, to take read load off the indexer.
 4. Ask the devnet team how the public gateway (`thruput-tools`) submits to the scheduler:
    one transfer per call or batches, and how many connections.
