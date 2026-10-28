@@ -76,6 +76,7 @@ test("bounds pending work and drains successful receipts after release", async (
   assert.equal(engine.snapshot().observedBlocks, 1);
   assert.equal(engine.snapshot().averageTxPerBlock, 8);
   assert.ok(engine.snapshot().averageReceiptMs > 0);
+  assert.ok(engine.snapshot().recentReceiptMs > 0);
   assert.equal(engine.snapshot().backpressure, false);
   const elapsed = engine.snapshot().elapsedMs;
   await sleep(100);
@@ -199,6 +200,23 @@ test("probe polling checks one transfer per batch, then the rest of its batch", 
   assert.deepEqual(engine.snapshot().recentBlocks, [
     { height: "10", succeeded: 8 },
   ]);
+});
+
+test("a send rate paces batches instead of filling the in-flight cap at once", async (t) => {
+  // 40 transfers/s in batches of 4: after the saved-up first second, 10 batches a second.
+  const engine = fixture({}, { outstanding: 1000, rate: 40, leaseMs: 5000 });
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0.5, y: 0.5 });
+  await sleep(300);
+  const start = engine.snapshot().attempted;
+  await sleep(500);
+  const sent = engine.snapshot().attempted - start;
+  engine.stop("a");
+  assert.ok(start <= 56, `first ${start}`);
+  assert.ok(sent >= 12 && sent <= 32, `sent ${sent} in 0.5 s`);
+  assert.equal(engineLimits({}).rate, 0);
+  assert.throws(() => engineLimits({ SPRAY_RATE: "-1" }), /SPRAY_RATE/);
 });
 
 test("engine limits reject values that would stall or unbound the engine", () => {

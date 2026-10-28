@@ -36,6 +36,8 @@ export interface Snapshot {
   observedBlocks: number;
   pendingLimit: number;
   averageReceiptMs: number;
+  /** Send-to-receipt time of the transfers that confirmed in the last 5 s. */
+  recentReceiptMs: number;
   elapsedMs: number;
   backpressure: boolean;
   errors: string[];

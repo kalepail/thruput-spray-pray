@@ -204,21 +204,53 @@ cap device-pixel ratio at 2; WebGL uses a **160,000-particle** pool, Canvas 2D a
 | Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window   |
 | Sending               | Attempts per second over five seconds while spraying; the last second after it    |
 
-Receipts arrive in block-sized lumps: under load a block carries 100,000–200,000
-of these transfers every ~3 s, so any short time window swings with block
-timing. The headline therefore measures completed blocks, timed by the chain's own
-block times (`getBlockByHeight`), not by when receipts reached the app. Before two
-blocks land it shows the current spray's average, which starts at zero; after work
-ends, a trailing window decays to zero.
+Receipts arrive in block-sized lumps: under load a block carries 100,000–230,000
+of these transfers, so any short time window swings with block timing. The
+headline therefore measures completed blocks, timed by the chain's own block
+times (`getBlockByHeight`), not by when receipts reached the app. A block's time
+point is when it starts, and its work runs until the next block starts, so the
+two blocks `f-1` and `f` are divided by `start(f+1) - start(f-1)`. Block `f` is
+the newest block whose receipts are all in: while transfers are pending, the
+block before the newest one reported; with nothing pending, the block before the
+chain tip. If transfers are pending but no new block is reported for 6 s, it
+shows 0.
 
-Confirmations trail submissions. At devnet's limit about 393,000 transfers are in
-flight, so a transfer sent now confirms roughly 8–9 seconds later; the HUD shows
-this as "~N s to confirm" (in flight / confirmed rate). The graph beside the
-headline plots the last 60 seconds: the confirmed rate as a filled line and the
-sent rate as a dashed line, so the gap between them is visible. On the canvas,
-each confirmation lights up the place where that transfer was sprayed, oldest
-first, so the trail you drew glows again as its blocks land, including after you
-let go.
+The number is exact for those blocks, but it is not smooth, because the load the
+chain sees is not smooth. Starting from idle, the 393,216 in-flight cap fills in
+about 3 s, those transfers land in one or two blocks of ~200,000, and sends then
+wait for receipts. A 1-second tap sends ~110,000 transfers, which land in one
+block. Successive two-block rates during one long hold measured 15k–55k tx/s.
+
+The headline also trails the chain. At light load a block's receipts are all
+counted about 1 s after it commits; with ~300,000 in flight it takes 5–7 s,
+because receipt lookups scale with the number pending. The HUD shows the
+measured send-to-receipt time of the transfers confirmed in the last 5 s as
+"N s to confirm" (about 9–10 s at devnet's limit). The graph beside the headline
+plots the last 60 seconds: the confirmed rate as a filled line and the sent rate
+as a dashed line, so the gap between them is visible. On the canvas, each
+confirmation lights up the place where that transfer was sprayed, oldest first,
+so the trail you drew glows again as its blocks land, including after you let
+go.
+
+#### Block time and send rate
+
+Devnet produces blocks one at a time: the proposer executes, peers replay, SCP
+agrees, each node commits, then the next block starts. Idle blocks take 2.03 s,
+and each block takes about 2.1 s plus 5.5 µs per transfer, so no load keeps the
+average at 2.0 s. `SPRAY_RATE` paces sends to a total rate instead of filling the
+in-flight cap at once. Measured over 30-second runs with 24 wallets (chain rate:
+our transfers per loaded block / that block's own interval):
+
+| Sending       | Chain tx/s | Average block | Longest block | Receipts counted after commit |
+| ------------- | ---------: | ------------: | ------------: | ----------------------------: |
+| Unpaced       |     46,919 |        2.75 s |        2.87 s |                         5.5 s |
+| 45,000/s      |     43,212 |        2.78 s |        3.31 s |                         6.5 s |
+| 35,000/s      |     34,105 |        2.51 s |        2.63 s |                         4.5 s |
+| 25,000/s      |     24,342 |        2.35 s |        2.38 s |                         2.2 s |
+
+Pacing near the limit costs throughput without shortening blocks, so the hosted
+app sends unpaced. A lower rate trades throughput for shorter blocks and faster
+receipts.
 
 Idle gaps between sprays are excluded from average time. A lost submission
 response is checked using the original hash, never replaced with another
@@ -308,6 +340,7 @@ curl -s -X POST https://rpc.thruput.network -H 'content-type: application/json' 
 | `SPRAY_LANES`                                | `48`        | Lane objects; a multiple of `SPRAY_WALLETS`                |
 | `SPRAY_BATCH_SIZE`, `SPRAY_CONCURRENCY`      | `256`, `96` | Starting settings; concurrency is divided between lanes    |
 | `SPRAY_OUTSTANDING`                          | `393216`    | Total in flight; covers 6–8 s receipts at devnet's limit   |
+| `SPRAY_RATE`                                 | `0`         | Total sends per second across lanes; 0 sends unpaced       |
 | `SPRAY_POLL_CONCURRENCY`, `SPRAY_POLL_BATCH` | `8`, `1000` | Receipt lookups per lane; RPC arrays take up to 1,000      |
 | `SPRAY_PROBE_INTERVAL_MS`                    | `200`       | Poll one transfer per batch often, the rest after it lands |
 | `SPRAY_FIRST_POLL_RATIO`                     | `0.8`       | First poll near the average receipt delay                  |

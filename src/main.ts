@@ -277,11 +277,11 @@ function update(snapshot: Snapshot): void {
     spraying ? state.submitTps : state.sendingTps,
   );
   element("in-flight").textContent = format.format(state.pending);
-  // Little's law: transfers in flight divided by the confirmed rate is how long a
-  // transfer sent now waits to confirm.
+  // Measured, not estimated: send-to-receipt time of the transfers that confirmed
+  // in the last 5 s.
   element("confirm-delay").textContent =
-    state.pending > 0 && state.liveTps > 500
-      ? ` · ~${Math.max(1, Math.round(state.pending / state.liveTps))} s to confirm`
+    state.recentReceiptMs > 0
+      ? ` · ${(state.recentReceiptMs / 1000).toFixed(1)} s to confirm`
       : "";
   element("receipt-delay").textContent =
     `${format.format(state.averageReceiptMs)} ms`;

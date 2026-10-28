@@ -76,7 +76,7 @@ export class SprayLane extends DurableObject<Env> {
     version: string,
     lane: { coordinator: string; sender: number; slot: number; slots: number },
     settings: Settings,
-    outstanding: number,
+    limits: { outstanding: number; rate: number },
   ): Promise<void> {
     this.checkVersion(version);
     this.lastReport = Date.now();
@@ -116,7 +116,7 @@ export class SprayLane extends DurableObject<Env> {
             ? socketPool(this.env.THRUPUT_RPC_URL, sockets).post
             : undefined,
         }),
-        { ...engineLimits(vars), outstanding },
+        { ...engineLimits(vars), ...limits },
       );
       // Push each submitted batch at once so the trail follows the pointer.
       engine.on("particles", ({ count }) => {

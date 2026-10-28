@@ -28,6 +28,8 @@ type Lane = ReturnType<typeof laneStub>;
 
 // A lane call that never settles would otherwise block the caller indefinitely.
 const LANE_CALL_MS = 5_000;
+// Transfers pending but no new block reported for this long: none are confirming.
+const STALL_MS = 6_000;
 const LANE_CONFIGURE_MS = 120_000;
 function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -49,6 +51,7 @@ export class SprayPray extends DurableObject<Env> {
   private laneCount = 0;
   private wallets = 0;
   private outstanding = 0;
+  private rate = 0;
   private lanes?: Promise<Lane[]>;
   private reports: (LaneReport | null)[] = [];
   private configuring?: Promise<void>;
@@ -71,8 +74,10 @@ export class SprayPray extends DurableObject<Env> {
   private timepoints = new Map<string, number>();
   private timepointReads = new Set<string>();
   private sprayStartedAt = 0;
-  /** Successful transfers when the current spray began. */
-  private sprayBaseline = 0;
+  /** The chain tip, read while nothing is pending so the rate can fall to zero. */
+  private tip = 0n;
+  private tipReadAt = 0;
+  private lastRate = 0;
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -88,6 +93,7 @@ export class SprayPray extends DurableObject<Env> {
     });
     const limits = engineLimits(vars);
     this.outstanding = limits.outstanding;
+    this.rate = limits.rate;
     this.wallets = limits.wallets;
     this.laneCount = Number(vars.SPRAY_LANES ?? this.wallets);
     if (
@@ -112,7 +118,7 @@ export class SprayPray extends DurableObject<Env> {
       }));
   }
 
-  /** Lane settings divide the total concurrency and in-flight budget between lanes. */
+  /** Lane settings divide the total concurrency, in-flight budget, and send rate between lanes. */
   private laneSettings(settings: Settings) {
     return {
       settings: {
@@ -122,14 +128,18 @@ export class SprayPray extends DurableObject<Env> {
           Math.ceil(settings.concurrency / this.laneCount),
         ),
       },
-      outstanding: Math.floor(this.outstanding / this.laneCount),
+      limits: {
+        outstanding: Math.floor(this.outstanding / this.laneCount),
+        // 0 leaves sending unpaced; any set rate keeps every lane paced.
+        rate: this.rate && Math.max(1, Math.floor(this.rate / this.laneCount)),
+      },
     };
   }
 
   private configureLanes(settings: Settings): Promise<void> {
     if (this.configuring)
       return Promise.reject(new Error("Configuration is already running"));
-    const { settings: lane, outstanding } = this.laneSettings(settings);
+    const { settings: lane, limits } = this.laneSettings(settings);
     this.setupError = undefined;
     const run = (async () => {
       const lanes = await this.laneStubs();
@@ -145,7 +155,7 @@ export class SprayPray extends DurableObject<Env> {
                 slots: this.laneCount / this.wallets,
               },
               lane,
-              outstanding,
+              limits,
             ),
             LANE_CONFIGURE_MS,
           ),
@@ -221,9 +231,8 @@ export class SprayPray extends DurableObject<Env> {
           this.seen.size - 32,
         )) {
           this.seen.delete(height);
-          this.timepoints.delete(height);
         }
-      for (const height of this.seen.keys()) void this.readTimepoint(height);
+      this.readChainTimes();
       const state = this.snapshot();
       this.broadcast({ type: "state", state });
       this.stopIfIdle(state);
@@ -272,13 +281,67 @@ export class SprayPray extends DurableObject<Env> {
         result?: { blockTimepoint?: string } | null;
       };
       const nanos = body.result?.blockTimepoint;
-      if (nanos && this.seen.has(height))
+      if (nanos)
         this.timepoints.set(height, Number(BigInt(nanos) / 1_000_000n));
     } catch {
-      // The observed time stands in until a read succeeds.
+      // Read again on a later tick.
     } finally {
       this.timepointReads.delete(height);
     }
+  }
+
+  /**
+   * Reads the chain times the block rate needs: the blocks around the frontier, and,
+   * every 500 ms while nothing is pending, the chain tip.
+   */
+  private readChainTimes(): void {
+    const frontier = this.frontier(this.pendingNow());
+    if (frontier !== undefined)
+      for (let h = frontier - 1n; h <= frontier + 1n; h++)
+        if (h > 0n) void this.readTimepoint(String(h));
+    for (const height of [...this.timepoints.keys()])
+      if (frontier !== undefined && BigInt(height) < frontier - 8n)
+        this.timepoints.delete(height);
+    if (this.pendingNow() === 0 && Date.now() - this.tipReadAt > 500) {
+      this.tipReadAt = Date.now();
+      void fetch(String(this.env.THRUPUT_RPC_URL), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getChainTip",
+          params: {},
+        }),
+        signal: AbortSignal.timeout(LANE_CALL_MS),
+      })
+        .then((r) => r.json() as Promise<{ result?: { blockHeight: string } }>)
+        .then((body) => {
+          if (body.result) this.tip = BigInt(body.result.blockHeight);
+        })
+        .catch(() => {});
+    }
+  }
+
+  private pendingNow(): number {
+    return this.reports.reduce((n, r) => n + (r?.snapshot.pending ?? 0), 0);
+  }
+
+  /**
+   * The newest block whose receipts are all in. While transfers are pending, the
+   * newest block our lanes have reported may still be collecting receipts, so the
+   * block before it. With nothing pending every receipt is in, so the block before
+   * the chain tip, whose end the tip's start time gives: blocks after our last one
+   * hold none of our transfers.
+   */
+  private frontier(pending: number): bigint | undefined {
+    let newest: bigint | undefined;
+    for (const height of this.seen.keys())
+      if (newest === undefined || BigInt(height) > newest)
+        newest = BigInt(height);
+    if (pending > 0) return newest === undefined ? undefined : newest - 1n;
+    if (newest === undefined) return this.tip ? this.tip - 1n : undefined;
+    return this.tip > newest ? this.tip - 1n : newest;
   }
 
   /** Merge a lane's newly reported heights and advance its cursor. */
@@ -320,38 +383,31 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
-   * Confirmed transfers per second over the last two completed blocks. Receipts
-   * arrive in block-sized lumps (100k or more every ~3 s at devnet's limit), so any
-   * short time window swings with block timing; a block-to-block rate is accurate as
-   * soon as two blocks land. Intervals use the chain's block times when both ends are
-   * known, else the time our lanes first saw each block. Undefined until two blocks
-   * land, and once blocks stop, so the caller falls back.
+   * Confirmed transfers per second over the last two complete chain blocks: our
+   * successful transfers in those blocks divided by their chain time. Blocks are
+   * taken by chain height, so a block with none of our transfers counts as zero and
+   * the rate falls to zero within two blocks after confirmations stop. Receipts
+   * arrive in block-sized lumps (100k or more every ~3 s at devnet's limit), so a
+   * shorter time window would swing with block timing.
    */
-  private blockRate(
-    counts: Map<string, number>,
-    working: boolean,
-  ): number | undefined {
-    const heights = [...counts.keys()]
-      // Only blocks from this spray: an older block would stretch the interval.
-      .filter((height) => (this.seen.get(height) ?? 0) >= this.sprayStartedAt)
-      .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
-    const latest = heights.at(-1);
-    if (!latest || Date.now() - this.seen.get(latest)! > 5_000)
-      return undefined;
-    // While transfers are in flight the newest block may still be collecting receipts.
-    const complete = working ? heights.slice(0, -1) : heights;
-    // The rate needs the block before the counted ones as the start of its interval.
-    const counted = complete.slice(Math.max(1, complete.length - 2));
-    const before = heights[heights.indexOf(counted[0]!) - 1];
-    if (!counted.length || !before) return undefined;
-    const last = counted.at(-1)!;
-    const chain =
-      this.timepoints.has(last) && this.timepoints.has(before)
-        ? this.timepoints
-        : this.seen;
-    const seconds = (chain.get(last)! - chain.get(before)!) / 1000;
-    if (seconds <= 0) return undefined;
-    return counted.reduce((n, h) => n + counts.get(h)!, 0) / seconds;
+  private blockRate(counts: Map<string, number>, pending: number): number {
+    const frontier = this.frontier(pending);
+    if (frontier === undefined || frontier < 2n) return 0;
+    // Nothing reported for a while although transfers are pending: none confirm now.
+    const newest = Math.max(0, ...this.seen.values());
+    if (pending > 0 && Date.now() - newest > STALL_MS) return 0;
+    // A block's time point is when it starts, and its work fills the time until the
+    // next one starts: blocks f-1 and f run from the start of f-1 to the start of f+1.
+    const start = this.timepoints.get(String(frontier - 1n));
+    const end = this.timepoints.get(String(frontier + 1n));
+    // Until both chain times are read (one RPC round trip), keep the last value.
+    if (end === undefined || start === undefined || end <= start)
+      return this.lastRate;
+    const confirmed =
+      (counts.get(String(frontier - 1n)) ?? 0) +
+      (counts.get(String(frontier)) ?? 0);
+    this.lastRate = (confirmed * 1000) / (end - start);
+    return this.lastRate;
   }
 
   snapshot(): Snapshot {
@@ -363,6 +419,7 @@ export class SprayPray extends DurableObject<Env> {
     const elapsedMs = Math.max(0, ...lanes.map((s) => s.elapsedMs));
     const receiptCount = reports.reduce((n, r) => n + r.receiptCount, 0);
     const receiptTimeMs = reports.reduce((n, r) => n + r.receiptTimeMs, 0);
+    const recentConfirmed = sum((s) => s.liveTps);
     const byHeight = new Map<string, number>();
     for (const lane of lanes)
       for (const block of lane.recentBlocks)
@@ -377,7 +434,6 @@ export class SprayPray extends DurableObject<Env> {
     let message: string;
     const laneError = lanes.find((s) => s.phase === "error");
     const pending = sum((s) => s.pending);
-    const working = pending > 0 || this.owner !== null;
     if (this.setupError || laneError) {
       phase = "error";
       message = this.setupError ?? laneError!.message;
@@ -410,15 +466,7 @@ export class SprayPray extends DurableObject<Env> {
       unresolved: sum((s) => s.unresolved),
       resubmitted: sum((s) => s.resubmitted),
       pending,
-      // Before two blocks land, this spray's own average rises from zero; it never
-      // starts from the last spray's rate. After a release, the lanes' trailing window
-      // decays to zero.
-      liveTps:
-        this.blockRate(byHeight, working) ??
-        (this.owner
-          ? ((succeeded - this.sprayBaseline) * 1000) /
-            Math.max(1_000, Date.now() - this.sprayStartedAt)
-          : sum((s) => s.liveTps)),
+      liveTps: this.blockRate(byHeight, pending),
       submitTps: sum((s) => s.submitTps),
       sendingTps: sum((s) => s.sendingTps),
       recentBlocks: [...byHeight]
@@ -430,6 +478,10 @@ export class SprayPray extends DurableObject<Env> {
       observedBlocks: this.blocks.size,
       pendingLimit: sum((s) => s.pendingLimit),
       averageReceiptMs: receiptCount ? receiptTimeMs / receiptCount : 0,
+      // Each lane's 5 s average, weighted by the transfers it confirmed in that window.
+      recentReceiptMs: recentConfirmed
+        ? sum((s) => s.recentReceiptMs * s.liveTps) / recentConfirmed
+        : 0,
       elapsedMs,
       backpressure: lanes.some((s) => s.backpressure),
       errors: errors.slice(-8),
@@ -449,10 +501,7 @@ export class SprayPray extends DurableObject<Env> {
         "Another browser is spraying. Try again when it finishes.",
       );
     const starting = this.owner === null;
-    if (starting) {
-      this.sprayStartedAt = Date.now();
-      this.sprayBaseline = state.succeeded;
-    }
+    if (starting) this.sprayStartedAt = Date.now();
     this.owner = id;
     this.point = point;
     this.heartbeat = Date.now();
@@ -500,6 +549,7 @@ export class SprayPray extends DurableObject<Env> {
     this.blocks.clear();
     this.seen.clear();
     this.timepoints.clear();
+    this.lastRate = 0;
     this.errors = [];
     this.cursors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.

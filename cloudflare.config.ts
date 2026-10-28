@@ -82,6 +82,8 @@ export default defineConfig(({ mode }) => {
         SPRAY_OUTSTANDING: bindings.text(
           tuned("393216", "32768", "SPRAY_OUTSTANDING"),
         ),
+        // Total transfers sent per second across lanes; 0 fills the in-flight cap at once.
+        SPRAY_RATE: bindings.text(tuned("0", "0", "SPRAY_RATE")),
         SPRAY_POLL_CONCURRENCY: bindings.text("8"),
         SPRAY_POLL_BATCH: bindings.text("1000"),
         SPRAY_RPC_SOCKETS: bindings.text("12"),

@@ -9,6 +9,8 @@ import {
 
 export interface EngineLimits {
   outstanding: number;
+  /** Transfers sent per second; 0 sends as fast as the in-flight cap allows. */
+  rate: number;
   /** Wallets in the transfer ring; each sender adds 7,000 transfers per block. */
   wallets: number;
   receiptTimeoutMs: number;
@@ -35,6 +37,9 @@ export function isNetworkFailure(error: unknown): boolean {
   );
 }
 
+/** Sends a paced engine may save up while idle or blocked. */
+const PACE_BURST_SECONDS = 1;
+
 /** Longest pause after a backend reports itself unavailable. */
 const BACKOFF_MAX_MS = 8_000;
 
@@ -60,6 +65,7 @@ export function engineLimits(env: Record<string, unknown> = {}): EngineLimits {
     throw new Error("SPRAY_FIRST_POLL_RATIO must be between 0 and 2");
   return {
     outstanding: number("SPRAY_OUTSTANDING", 8192, 1),
+    rate: number("SPRAY_RATE", 0),
     wallets: number("SPRAY_WALLETS", 4, 2),
     receiptTimeoutMs: 60_000,
     leaseMs: 1500,
@@ -111,6 +117,10 @@ export class Engine {
   private polling = 0;
   private backoffMs = 0;
   private backoffUntil = 0;
+  /** Send allowance in transfers; it grows at `limits.rate` up to one burst. */
+  private tokens = 0;
+  private tokensAt = 0;
+  private paceTimer?: ReturnType<typeof setTimeout>;
   private closed = false;
   private pending = new Map<string, Pending>();
   private counts = {
@@ -122,7 +132,13 @@ export class Engine {
     resubmitted: 0,
   };
   private errors: string[] = [];
-  private samples: { time: number; sent: number; succeeded: number }[] = [];
+  private samples: {
+    time: number;
+    sent: number;
+    succeeded: number;
+    /** Send-to-receipt time summed over the succeeded transfers. */
+    receiptMs: number;
+  }[] = [];
   private elapsed = 0;
   private successfulBlocks = new Set<string>();
   private blockCounts = new Map<string, number>();
@@ -258,6 +274,8 @@ export class Engine {
       5,
       Math.max(1, (now - (this.samples[0]?.time ?? now)) / 1000),
     );
+    const recent = this.samples.reduce((n, s) => n + s.succeeded, 0);
+    const recentMs = this.samples.reduce((n, s) => n + s.receiptMs, 0);
     const elapsedMs =
       this.elapsed +
       (this.workStart === null ? 0 : performance.now() - this.workStart);
@@ -288,6 +306,7 @@ export class Engine {
       averageReceiptMs: this.receiptCount
         ? this.receiptTimeMs / this.receiptCount
         : 0,
+      recentReceiptMs: recent ? recentMs / recent : 0,
       elapsedMs,
       backpressure:
         this.owner !== null &&
@@ -299,6 +318,30 @@ export class Engine {
     };
   }
 
+  /** True when the send rate allows another batch now; else wakes the pump when it will. */
+  private paced(): boolean {
+    const { rate } = this.limits;
+    if (!rate) return true;
+    const batch = this.settings.batchSize;
+    const now = performance.now();
+    // A steady rate keeps blocks even: filling the in-flight cap at once makes one
+    // huge block, then a slow one, then a near-empty one while receipts return.
+    this.tokens = Math.min(
+      Math.max(batch, rate * PACE_BURST_SECONDS),
+      this.tokens + (rate * (now - this.tokensAt)) / 1000,
+    );
+    this.tokensAt = now;
+    if (this.tokens >= batch) return true;
+    this.paceTimer ??= setTimeout(
+      () => {
+        this.paceTimer = undefined;
+        this.pump();
+      },
+      Math.ceil(((batch - this.tokens) * 1000) / rate),
+    );
+    return false;
+  }
+
   private pump(): void {
     while (
       !this.closed &&
@@ -306,8 +349,10 @@ export class Engine {
       Date.now() >= this.backoffUntil &&
       this.inFlight < this.settings.concurrency &&
       this.pending.size + this.reserved + this.settings.batchSize <=
-        this.limits.outstanding
+        this.limits.outstanding &&
+      this.paced()
     ) {
+      this.tokens -= this.settings.batchSize;
       this.inFlight++;
       this.reserved += this.settings.batchSize;
       void this.send(this.generation);
@@ -362,6 +407,7 @@ export class Engine {
         time: sentAt,
         sent: operations.length,
         succeeded: 0,
+        receiptMs: 0,
       });
       this.emit("particles", {
         count: operations.length,
@@ -574,9 +620,13 @@ export class Engine {
           this.blockCounts.delete(oldest);
         }
       }
+      const now = Date.now();
+      const receiptMs = now - pending.sentAt;
       const last = this.samples.at(-1);
-      if (last && Date.now() - last.time < 50) last.succeeded++;
-      else this.samples.push({ time: Date.now(), sent: 0, succeeded: 1 });
+      if (last && now - last.time < 50) {
+        last.succeeded++;
+        last.receiptMs += receiptMs;
+      } else this.samples.push({ time: now, sent: 0, succeeded: 1, receiptMs });
     }
     if (outcome === "failed")
       this.recordError(
@@ -619,5 +669,6 @@ export class Engine {
     this.closed = true;
     if (this.owner) this.stop(this.owner);
     clearInterval(this.timer);
+    if (this.paceTimer) clearTimeout(this.paceTimer);
   }
 }
