@@ -82,6 +82,7 @@ try {
     JSON.stringify({
       wallets: result.walletCount,
       succeeded: result.succeeded,
+      assumed: result.assumed ?? 0,
       averageTps: Math.round(result.averageTps),
       elapsedMs: Math.round(result.elapsedMs),
       failed: result.failed,

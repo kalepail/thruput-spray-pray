@@ -89,7 +89,11 @@ export default defineConfig(({ mode }) => {
         SPRAY_RPC_SOCKETS: bindings.text("12"),
         SPRAY_FIRST_POLL_RATIO: bindings.text("0.8"),
         // Poll one transfer per batch often; poll the rest once it lands.
-        SPRAY_PROBE_INTERVAL_MS: bindings.text("200"),
+        SPRAY_PROBE_INTERVAL_MS: bindings.text(
+          shell.SPRAY_PROBE_INTERVAL_MS ?? "200",
+        ),
+        // A test deploy can look up 1 in N transfers and settle the rest from probes.
+        SPRAY_RECEIPT_SAMPLE: bindings.text(shell.SPRAY_RECEIPT_SAMPLE ?? "1"),
         SPRAY_SUBMIT_RETRIES: bindings.text("2"),
         // Ask the scheduler about receipts missing this long; resend on `retry`.
         SPRAY_STATUS_AFTER_MS: bindings.text("6000"),

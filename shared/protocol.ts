@@ -24,6 +24,8 @@ export interface Snapshot {
   unresolved: number;
   /** Transfers resent with identical bytes after the scheduler reported a retryable conflict. */
   resubmitted: number;
+  /** Counted in `succeeded` from their batch's probe, without a receipt lookup. */
+  assumed?: number;
   pending: number;
   liveTps: number;
   submitTps: number;

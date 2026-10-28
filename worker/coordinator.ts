@@ -465,6 +465,7 @@ export class SprayPray extends DurableObject<Env> {
       failed: sum((s) => s.failed),
       unresolved: sum((s) => s.unresolved),
       resubmitted: sum((s) => s.resubmitted),
+      assumed: sum((s) => s.assumed ?? 0),
       pending,
       liveTps: this.blockRate(byHeight, pending),
       submitTps: sum((s) => s.submitTps),

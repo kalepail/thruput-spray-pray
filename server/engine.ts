@@ -22,6 +22,11 @@ export interface EngineLimits {
   pollIntervalMs: number;
   submitRetries: number;
   probeIntervalMs: number;
+  /**
+   * With probing, look up 1 in this many batch members; the others settle from their
+   * batch's probe. 1 looks up every transfer.
+   */
+  receiptSample: number;
   statusAfterMs: number;
 }
 
@@ -76,6 +81,7 @@ export function engineLimits(env: Record<string, unknown> = {}): EngineLimits {
     pollIntervalMs: number("SPRAY_POLL_INTERVAL_MS", 500, 1),
     submitRetries: number("SPRAY_SUBMIT_RETRIES", 0),
     probeIntervalMs: number("SPRAY_PROBE_INTERVAL_MS", 0),
+    receiptSample: number("SPRAY_RECEIPT_SAMPLE", 1, 1),
     // 0 disables scheduler status checks and resends.
     statusAfterMs: number("SPRAY_STATUS_AFTER_MS", 0),
   };
@@ -102,6 +108,8 @@ interface Pending {
   group: Group;
   /** Earliest time to ask the scheduler about a missing receipt. */
   statusAt: number;
+  /** Never looked up: settles with its batch's probe, or is polled if the probe fails. */
+  assumed: boolean;
 }
 export class Engine {
   private listeners: Listeners = { state: [], particles: [] };
@@ -130,6 +138,7 @@ export class Engine {
     failed: 0,
     unresolved: 0,
     resubmitted: 0,
+    assumed: 0,
   };
   private errors: string[] = [];
   private samples: {
@@ -246,6 +255,7 @@ export class Engine {
       failed: 0,
       unresolved: 0,
       resubmitted: 0,
+      assumed: 0,
     };
     this.samples = [];
     this.errors = [];
@@ -385,21 +395,28 @@ export class Engine {
       const probing = this.limits.probeIntervalMs > 0;
       for (const operation of operations) {
         const probe = probing && operation.hash === group.probe;
+        const assumed =
+          probing &&
+          !probe &&
+          this.limits.receiptSample > 1 &&
+          Math.random() * this.limits.receiptSample >= 1;
         this.pending.set(operation.hash, {
           operation,
           sentAt,
           // With probing, one transfer per batch is checked often; the rest wait
           // for it to land, with a later first poll as a fallback.
-          nextPoll:
-            sentAt +
-            (probe
-              ? this.limits.firstPollMs
-              : probing
-                ? this.firstPollDelay() * 1.5
-                : this.firstPollDelay()),
+          nextPoll: assumed
+            ? Infinity
+            : sentAt +
+              (probe
+                ? this.limits.firstPollMs
+                : probing
+                  ? this.firstPollDelay() * 1.5
+                  : this.firstPollDelay()),
           ready: false,
           group,
           statusAt: sentAt + this.limits.statusAfterMs,
+          assumed,
         });
       }
       this.counts.attempted += operations.length;
@@ -601,12 +618,29 @@ export class Engine {
       this.receiptTimeMs += Date.now() - pending.sentAt;
       this.receiptCount++;
     }
-    if (height !== undefined && pending.group.probe === hash) {
-      // The probe landed, so its batch has very likely landed too: poll it now.
+    if (pending.group.probe === hash) {
       for (const member of pending.group.hashes) {
         const item = this.pending.get(member);
+        if (!item) continue;
+        if (item.assumed) {
+          // Sampled receipts: a successful probe settles the members it stands for;
+          // otherwise they are looked up like any other transfer.
+          if (outcome === "succeeded" && height !== undefined) {
+            this.counts.assumed++;
+            this.settle(member, "succeeded", height);
+          } else {
+            item.assumed = false;
+            item.nextPoll = 0;
+          }
+        }
+        // The probe landed, so its batch has very likely landed too: poll it now.
         // Skip members whose lookup is already in flight.
-        if (item?.ready && item.nextPoll !== Infinity) item.nextPoll = 0;
+        else if (
+          height !== undefined &&
+          item.ready &&
+          item.nextPoll !== Infinity
+        )
+          item.nextPoll = 0;
       }
     }
     if (outcome === "succeeded") {

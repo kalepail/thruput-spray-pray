@@ -219,6 +219,40 @@ test("a send rate paces batches instead of filling the in-flight cap at once", a
   assert.throws(() => engineLimits({ SPRAY_RATE: "-1" }), /SPRAY_RATE/);
 });
 
+test("sampled receipts settle unsampled members from their probe", async (t) => {
+  const polls: string[] = [];
+  const engine = fixture(
+    {
+      async poll(ops) {
+        polls.push(...ops.map((o) => o.hash));
+        // The second batch's probe fails, so its members must be looked up.
+        return ops.map((o) =>
+          o.hash === "4"
+            ? { state: "failed" as const, height: "10" }
+            : { state: "succeeded" as const, height: "10" },
+        );
+      },
+    },
+    {
+      probeIntervalMs: 20,
+      firstPollMs: 10,
+      pollIntervalMs: 5000,
+      receiptSample: 1_000_000,
+    },
+  );
+  t.after(() => engine.close());
+  await ready(engine);
+  engine.spray("a", { x: 0, y: 0 });
+  await waitFor(() => engine.snapshot().attempted === 8);
+  engine.stop("a");
+  await waitFor(() => engine.snapshot().phase === "ready");
+  const snapshot = engine.snapshot();
+  assert.deepEqual(polls.sort(), ["0", "4", "5", "6", "7"]);
+  assert.equal(snapshot.assumed, 3);
+  assert.equal(snapshot.succeeded, 7);
+  assert.equal(snapshot.failed, 1);
+});
+
 test("engine limits reject values that would stall or unbound the engine", () => {
   assert.equal(engineLimits({}).outstanding, 8192);
   assert.equal(engineLimits({ SPRAY_OUTSTANDING: " " }).outstanding, 8192);
