@@ -306,10 +306,15 @@ kbd {
   left: 50%;
   transform: translateX(-50%);
   max-width: calc(100% - 40px);
+  padding: 5px 12px;
   font-family: ui-monospace, monospace;
   font-size: 0.75rem;
   text-align: center;
   color: #a9b499;
+  /* Particles pass behind the line while spraying; keep it legible. */
+  background: rgb(16 17 15 / 72%);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
   pointer-events: none;
 }
 .status[data-phase="ready"] {

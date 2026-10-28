@@ -197,7 +197,7 @@ caps device-pixel ratio at 2.
 | Confirmed tx/sec      | Successful transfers in the last three completed blocks / their interval          |
 | Average confirmed/sec | Successful receipts / active experiment time, including signing and receipt drain |
 | Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window   |
-| Sending               | Attempts in the last second                                                       |
+| Sending               | Attempts per second over five seconds while spraying; the last second after it    |
 
 Receipts arrive in block-sized lumps: under load a block carries 100,000–200,000
 of these transfers every ~3 s, so any short time window swings with block

@@ -1,12 +1,14 @@
 import type { Point } from "../shared/protocol.js";
 
 const capacity = 24_000;
-// Submitted batches arrive in pulses: devnet confirms in blocks every ~2.5 s, and new
-// batches go out as each block frees in-flight capacity. Particles are released at
-// the smoothed arrival rate instead, so a drag shows a continuous stream.
+// Submitted batches arrive in pulses: devnet confirms in blocks every ~3 s, and at
+// its limit each block frees 100,000 or more in-flight slots at once. Particles are
+// released at the smoothed arrival rate instead, so a drag shows a continuous stream.
 const RATE_SECONDS = 2.5;
-// Release faster when needed so no more than this much is ever waiting.
-const MAX_LAG_SECONDS = 0.5;
+// Release faster when needed so no more than this much is ever waiting. One block
+// time spreads a lump over the gap until the next; a shorter lag drew each lump as a
+// flash. Release discards the queue, so this adds no trail after the click ends.
+const MAX_LAG_SECONDS = 3;
 // Particles that arrive while nobody has held the canvas yet (a viewer joining
 // mid-spray) flush at a fixed fast rate.
 const FLUSH_SECONDS = 0.08;
@@ -141,9 +143,10 @@ export class ParticleCanvas {
     this.carry = count < this.queued ? exact - count : 0;
     if (count === 0) return;
     this.queued -= count;
+    // Bound by the release rate too: a burst must not recycle live particles.
     const density = Math.min(
       this.frameDensity,
-      POOL_RATE / Math.max(this.rate, 1),
+      POOL_RATE / Math.max(this.rate, perSecond, 1),
     );
     const drawn = count * density + this.drawCarry;
     this.drawCarry = drawn - Math.floor(drawn);

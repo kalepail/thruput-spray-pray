@@ -167,9 +167,12 @@ function update(snapshot: Snapshot): void {
   element("network-label").textContent = state.network;
   const status = element("status");
   status.dataset.phase = state.phase;
-  const message = state.backpressure
-    ? `Flow control: waiting for receipts (${format.format(state.pending)} pending). No transfers dropped.`
-    : state.message;
+  // At devnet's limit the in-flight cap stays full while spraying; that is the
+  // expected state, not a fault.
+  const message =
+    state.backpressure && spraying
+      ? "Devnet is at capacity. New transfers go out as blocks confirm; none are dropped."
+      : state.message;
   if (status.textContent !== message) status.textContent = message;
   const metrics: Record<string, number> = {
     "live-tps": state.liveTps,
@@ -189,7 +192,11 @@ function update(snapshot: Snapshot): void {
     if (id in eased) eased[id]!.target = value;
     else element(id).textContent = format.format(value);
   }
-  element("sending-tps").textContent = format.format(state.sendingTps);
+  // Batches go out in block-sized lumps, so the last second swings to 0 between
+  // blocks. Show the five-second rate while spraying and the last second after it.
+  element("sending-tps").textContent = format.format(
+    spraying ? state.submitTps : state.sendingTps,
+  );
   element("in-flight").textContent = format.format(state.pending);
   const bars = element("block-bars").children;
   const blocks = state.recentBlocks;
