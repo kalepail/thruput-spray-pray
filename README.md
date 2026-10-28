@@ -412,6 +412,9 @@ one sprayer per network. Browser, load, lease, and security tests target the loc
 dev server unless `APP_URL` names another app, for example
 `APP_URL=https://thruput-spray-pray.sdf-ecosystem.workers.dev npm run test:security`.
 They use that app's network. `test:load` fails if its WebSocket closes mid-run.
+`LOAD_ALLOW_ERRORS=1` lets `test:load` log recoverable errors, such as a backend
+pause, and still fail on any failed or unresolved transfer. `LOAD_WALLETS` checks
+the app's wallet count.
 `test:browser` restores the app's starting settings when it finishes. Browser
 screenshots and machine-readable results go to ignored `test-results/`.
 Browser tests use headless Chromium and do not require a wallet extension.
