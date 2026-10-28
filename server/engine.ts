@@ -48,6 +48,9 @@ const PACE_BURST_SECONDS = 1;
 /** Longest pause after a backend reports itself unavailable. */
 const BACKOFF_MAX_MS = 8_000;
 
+/** Pending transfers older than this are left out of `oldestPendingAt`. */
+const OLDEST_PENDING_MS = 20_000;
+
 /** The gateway's `-32050` answer: the backend behind it is down, not the transfer. */
 export function isBackendUnavailable(message: string): boolean {
   return /backend unavailable|-32050/i.test(message);
@@ -297,6 +300,7 @@ export class Engine {
       owner: this.owner,
       ...this.counts,
       pending: this.pending.size,
+      oldestPendingAt: this.oldestPendingAt(now),
       liveTps:
         this.samples.reduce((n, s) => n + s.succeeded, 0) / windowSeconds,
       submitTps: this.samples.reduce((n, s) => n + s.sent, 0) / windowSeconds,
@@ -592,6 +596,17 @@ export class Engine {
       for (const item of items)
         item.statusAt = Date.now() + this.limits.statusAfterMs;
     }
+  }
+
+  /**
+   * Pending transfers are kept in send order, so the first recent one is the oldest.
+   * Stragglers sent more than 20 s ago (lost or slow outcomes) are left out, so one
+   * of them cannot hold back the coordinator's block counts.
+   */
+  private oldestPendingAt(now: number): number {
+    for (const item of this.pending.values())
+      if (now - item.sentAt <= OLDEST_PENDING_MS) return item.sentAt;
+    return 0;
   }
 
   /** Skip lookups that would almost certainly miss: most receipts arrive near the observed average. */

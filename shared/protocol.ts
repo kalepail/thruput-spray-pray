@@ -27,6 +27,12 @@ export interface Snapshot {
   /** Counted in `succeeded` from their batch's probe, without a receipt lookup. */
   assumed?: number;
   pending: number;
+  /**
+   * Send time (ms) of the oldest transfer still waiting for a receipt, leaving out
+   * any sent more than 20 s ago; 0 when none. A block that committed before this
+   * holds none of the waiting transfers, so its count is final.
+   */
+  oldestPendingAt?: number;
   liveTps: number;
   submitTps: number;
   /** Transfers handed to submission in the last second. */

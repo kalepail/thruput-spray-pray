@@ -30,6 +30,12 @@ type Lane = ReturnType<typeof laneStub>;
 const LANE_CALL_MS = 5_000;
 // Transfers pending but no new block reported for this long: none are confirming.
 const STALL_MS = 6_000;
+// While blocks still commit, receipts can lag this long under load before the rate
+// is taken as stalled.
+const INDEX_LAG_MS = 15_000;
+// How often the chain tip is read. Under load the index stores blocks ~10 s late,
+// but the tip comes from the state database and does not lag.
+const TIP_READ_MS = 250;
 const LANE_CONFIGURE_MS = 120_000;
 function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -74,9 +80,11 @@ export class SprayPray extends DurableObject<Env> {
   private timepoints = new Map<string, number>();
   private timepointReads = new Set<string>();
   private sprayStartedAt = 0;
-  /** The chain tip, read while nothing is pending so the rate can fall to zero. */
+  /** The chain tip; with nothing pending, it lets the rate fall to zero. */
   private tip = 0n;
   private tipReadAt = 0;
+  /** When this object first saw each height as the chain tip, in ms. */
+  private tipSeenAt = new Map<string, number>();
   private lastRate = 0;
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
@@ -292,7 +300,7 @@ export class SprayPray extends DurableObject<Env> {
 
   /**
    * Reads the chain times the block rate needs: the blocks around the frontier, and,
-   * every 500 ms while nothing is pending, the chain tip.
+   * every 250 ms, the chain tip.
    */
   private readChainTimes(): void {
     const window = this.rateWindow(this.pendingNow());
@@ -303,7 +311,7 @@ export class SprayPray extends DurableObject<Env> {
     for (const height of [...this.timepoints.keys()])
       if (frontier !== undefined && BigInt(height) < frontier - 8n)
         this.timepoints.delete(height);
-    if (this.pendingNow() === 0 && Date.now() - this.tipReadAt > 500) {
+    if (Date.now() - this.tipReadAt > TIP_READ_MS) {
       this.tipReadAt = Date.now();
       void fetch(String(this.env.THRUPUT_RPC_URL), {
         method: "POST",
@@ -318,7 +326,14 @@ export class SprayPray extends DurableObject<Env> {
       })
         .then((r) => r.json() as Promise<{ result?: { blockHeight: string } }>)
         .then((body) => {
-          if (body.result) this.tip = BigInt(body.result.blockHeight);
+          if (!body.result) return;
+          const height = BigInt(body.result.blockHeight);
+          if (height > this.tip) {
+            this.tip = height;
+            this.tipSeenAt.set(String(height), Date.now());
+            if (this.tipSeenAt.size > 64)
+              this.tipSeenAt.delete(this.tipSeenAt.keys().next().value!);
+          }
         })
         .catch(() => {});
     }
@@ -328,19 +343,43 @@ export class SprayPray extends DurableObject<Env> {
     return this.reports.reduce((n, r) => n + (r?.snapshot.pending ?? 0), 0);
   }
 
+  /** The oldest recent send among all lanes' waiting transfers; 0 when none. */
+  private oldestPendingAt(): number {
+    let oldest = 0;
+    for (const report of this.reports) {
+      const at = report?.snapshot.oldestPendingAt ?? 0;
+      if (at && (!oldest || at < oldest)) oldest = at;
+    }
+    return oldest;
+  }
+
   /**
    * The newest block whose receipts are all in. While transfers are pending, the
-   * newest block our lanes have reported may still be collecting receipts, so the
-   * block before it. With nothing pending every receipt is in, so the block before
-   * the chain tip, whose end the tip's start time gives: blocks after our last one
-   * hold none of our transfers.
+   * newest block that this object saw commit before the oldest waiting transfer was
+   * sent: no waiting transfer can be in it. (Taking the block before the newest
+   * reported one failed under load: a few receipts from later blocks arrive while a
+   * large block's are still coming in, and the headline fell to a few hundred.)
+   * With nothing pending every receipt is in, so the block before the chain tip,
+   * whose end the tip's start time gives: blocks after our last one hold none of our
+   * transfers.
    */
   private frontier(pending: number): bigint | undefined {
     let newest: bigint | undefined;
     for (const height of this.seen.keys())
       if (newest === undefined || BigInt(height) > newest)
         newest = BigInt(height);
-    if (pending > 0) return newest === undefined ? undefined : newest - 1n;
+    if (pending > 0) {
+      const waiting = this.oldestPendingAt();
+      if (!waiting) return newest === undefined ? undefined : newest - 1n;
+      let complete: bigint | undefined;
+      for (const [height, seenAt] of this.tipSeenAt)
+        if (
+          seenAt < waiting &&
+          (complete === undefined || BigInt(height) > complete)
+        )
+          complete = BigInt(height);
+      return complete;
+    }
     if (newest === undefined) return this.tip ? this.tip - 1n : undefined;
     return this.tip > newest ? this.tip - 1n : newest;
   }
@@ -429,13 +468,28 @@ export class SprayPray extends DurableObject<Env> {
     const window = this.rateWindow(pending);
     if (window === undefined) return 0;
     // Nothing reported for a while although transfers are pending: none confirm now.
-    const newest = Math.max(0, ...this.seen.values());
-    if (pending > 0 && Date.now() - newest > STALL_MS) return 0;
+    // While blocks still commit, the index may only be late (~10 s under load).
+    const quiet = Date.now() - Math.max(0, ...this.seen.values());
+    const committing =
+      Date.now() - Math.max(0, ...this.tipSeenAt.values()) < STALL_MS;
+    if (
+      pending > 0 &&
+      quiet > STALL_MS &&
+      (!committing || quiet > INDEX_LAG_MS)
+    )
+      return 0;
     // A block's time point is when it starts, and its work fills the time until the
     // next one starts: blocks f-1 and f run from the start of f-1 to the start of f+1.
-    const start = this.timepoints.get(String(window.first));
-    const end = this.timepoints.get(String(window.last + 1n));
-    // Until both chain times are read (one RPC round trip), keep the last value.
+    let start = this.timepoints.get(String(window.first));
+    let end = this.timepoints.get(String(window.last + 1n));
+    // Under load the index stores block f+1 as late as its receipts. Until then, use
+    // when this object saw blocks commit: a block starts once the one before it is
+    // the tip. This is within one tip read (250 ms) of the chain time.
+    if (end === undefined || start === undefined) {
+      start = this.tipSeenAt.get(String(window.first - 1n));
+      end = this.tipSeenAt.get(String(window.last));
+    }
+    // Until both times are known, keep the last value.
     if (end === undefined || start === undefined || end <= start)
       return this.lastRate;
     let confirmed = 0;

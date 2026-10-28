@@ -210,10 +210,26 @@ headline therefore measures completed blocks, timed by the chain's own block
 times (`getBlockByHeight`), not by when receipts reached the app. A block's time
 point is when it starts, and its work runs until the next block starts, so the
 two blocks `f-1` and `f` are divided by `start(f+1) - start(f-1)`. Block `f` is
-the newest block whose receipts are all in: while transfers are pending, the
-block before the newest one reported; with nothing pending, the block before the
-chain tip. If transfers are pending but no new block is reported for 6 s, it
-shows 0.
+the newest block whose receipts are all in. While transfers are pending, that is
+the newest block the coordinator saw commit (it reads the chain tip every 250 ms)
+before the oldest waiting transfer was sent, so no waiting transfer can be in it;
+waiting transfers sent more than 20 s ago are left out. With nothing pending, it
+is the block before the chain tip. Blocks from before the spray are not counted.
+
+Under load the index stores each block about as late as its receipts, so
+`getBlockByHeight` cannot time the newest blocks. Until it can, the coordinator
+uses the times it saw each block become the chain tip, which are within one tip
+read of the chain's times. The spray's first block is counted as soon as its
+first receipts arrive, so the headline rises while they come in. Before that,
+the headline shows the average send rate since the spray started, labelled
+"SENDING TX / SEC". If transfers are pending but no new block is reported for
+6 s, the headline shows 0; while blocks still commit, it keeps its value for up
+to 15 s, because the index can be that late.
+
+Measured on the hosted app with a 20 s browser hold (October 28): the send rate
+showed after 1 s, and the confirmed rate took over 3.6–6.1 s after the click.
+Before this, the headline stayed at 0 for 14 s and then fell to a few hundred
+for several seconds.
 
 The number is exact for those blocks, but it is not smooth, because the load the
 chain sees is not smooth. Starting from idle, the 393,216 in-flight cap fills in
