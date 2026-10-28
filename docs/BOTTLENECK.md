@@ -42,7 +42,7 @@ period for the whole time.
 - If A+B is clearly above one source alone, the senders are the limit.
 - If A+B stays near 45k and the two share it, the chain is the limit.
 
-Runner: `test-results/bottleneck/run-matrix.sh` (ignored folder; results copied below).
+Runner and raw results: `docs/bottleneck-2026-10-28/` (`run-matrix.sh`).
 
 ### Results (2026-10-28, devnet 0.41.0)
 
@@ -127,12 +127,12 @@ after about 68 s, so A2 repeats it.
 the rate, block period, and receipt time did not improve. In B, 5,212 submissions had an
 ambiguous response and then settled from their probe without their own lookup, so the
 hosted app keeps `SPRAY_RECEIPT_SAMPLE=1`. A firehose or faster indexer would shorten the
-headline's receipt lag, but it would not raise tx/s.
+receipt lag. It would probably not raise tx/s much: both runs sat at the in-flight cap, but
+524,288 in flight, which covers more receipt lag, measured about 42k tx/s.
 
 ## Upstream benchmark for comparison
 
-`groundhogchain/metrics_history` (sparse clone at `../metrics_history`) stores hogd CI
-benchmarks. On 2026-10-28 (hogd `7f471b9f6`), `schedgateway_stress_batches` submitted
+`groundhogchain/metrics_history` stores hogd CI benchmarks. On 2026-10-28 (hogd `7f471b9f6`), `schedgateway_stress_batches` submitted
 1,944,400 native-token transfers in 10 s, about 194k tx/s, straight to the scheduler. That
 run used 8 connections, batches of 100, 1,000 accounts, and 500 ms blocks. One connection
 with one call in flight (`schedgateway_submit_c1`) gave about 3.4k tx/s at 279 us p50.
