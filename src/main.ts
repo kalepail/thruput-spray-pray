@@ -4,7 +4,7 @@ import {
   type ServerMessage,
   type Snapshot,
 } from "../shared/protocol.js";
-import { ParticleCanvas } from "./particles.js";
+import { ParticleCanvas, TRANSFERS_PER_PARTICLE } from "./particles.js";
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -13,6 +13,8 @@ function element<T extends HTMLElement>(id: string): T {
 }
 const canvas = element<HTMLCanvasElement>("canvas");
 const particles = new ParticleCanvas(canvas);
+element("ratio-caption").textContent =
+  `1 DOT = ${TRANSFERS_PER_PARTICLE} TRANSFERS`;
 const dialog = element<HTMLDialogElement>("controls");
 const app = element("app");
 const batchSize = element<HTMLInputElement>("batch-size");
@@ -156,11 +158,13 @@ function ease(now: number): void {
 }
 requestAnimationFrame(ease);
 
+let atCapacityUntil = 0;
 function update(snapshot: Snapshot): void {
   state = snapshot;
   // Viewers smooth another browser's spray while it holds the canvas.
   particles.held = held || (state.owner !== null && state.owner !== clientId);
   const spraying = state.phase === "spraying";
+  particles.confirmedRate = spraying ? state.liveTps : 0;
   app.classList.toggle("is-spraying", spraying);
   element("connection-dot").className =
     state.phase === "error" ? "error" : "ready";
@@ -168,9 +172,11 @@ function update(snapshot: Snapshot): void {
   const status = element("status");
   status.dataset.phase = state.phase;
   // At devnet's limit the in-flight cap stays full while spraying; that is the
-  // expected state, not a fault.
+  // expected state, not a fault. Keep the line for a moment after the cap frees up,
+  // so it does not flicker between blocks.
+  if (state.backpressure && spraying) atCapacityUntil = Date.now() + 3_000;
   const message =
-    state.backpressure && spraying
+    spraying && Date.now() < atCapacityUntil
       ? "Devnet is at capacity. New transfers go out as blocks confirm; none are dropped."
       : state.message;
   if (status.textContent !== message) status.textContent = message;

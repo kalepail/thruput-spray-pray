@@ -181,8 +181,10 @@ sending and polling for 1 s, doubling up to 8 s, and resumes on its own. The
 spray keeps its lease, and transfers do not time out to Unresolved during the
 pause.
 
-The canvas uses a fixed **24,000-particle** pool, draws each color in one pass, and
-caps device-pixel ratio at 2.
+The canvas draws with **WebGL**: the GPU computes each particle's position from its
+spawn values and age, so the CPU uploads only new particles. Without a hardware GPU
+it falls back to Canvas 2D (`?renderer=2d` forces it). Both use one fixed
+**30,000-particle** pool and the same motion, and cap device-pixel ratio at 2.
 
 ## Reading the numbers
 
@@ -214,15 +216,19 @@ Particles visualize **submission**, not successful commitment. A batch reaches t
 canvas about 200 ms after a click: the round trip plus signing the first batch. While
 a browser holds the canvas, it therefore draws predicted particles at the recent
 submission rate from the first frame, at most 0.4 seconds ahead; real batches then
-pay those back instead of being drawn twice. Submitted batches arrive in pulses,
-because devnet confirms in blocks, so the canvas queues them and releases particles
-at the smoothed rate (never more than 0.5 seconds behind). On release, prediction
+pay those back instead of being drawn twice. At devnet's limit, submissions arrive
+in waves of about 10 seconds: the in-flight cap fills, then waits for receipts. The
+canvas queues them and releases particles at the confirmed rate shown in the
+headline, or at the smoothed submission rate until one is known. It keeps up to
+12 seconds queued and slows down when less than 4 seconds remain, so a pause in
+submissions thins the spray instead of cutting it off. On release, prediction
 stops and anything still queued or arriving later is counted without being drawn,
 so the spray ends where the click ends; particles already in flight fade out.
 
-Up to one particle is drawn per attempted transaction. Above about 8,000 per second,
-or when a frame takes more than 8 ms to draw, fewer particles are drawn per
-transaction so live particles never overflow the 24,000-particle pool. The canvas
+One particle is drawn for every five attempted transactions, so the spray grows
+with throughput; the HUD says so. Above about 50,000 transactions per second, or
+when a frame takes more than 8 ms to draw, fewer particles are drawn per
+transaction so live particles never overflow the 30,000-particle pool. The canvas
 exposes `data-emitted` (transfers represented), `data-drawn`, `data-draw-ms`, and
 `data-density` for diagnostics. Counters are authoritative even if a slow browser
 misses a connection or cannot display every particle.
@@ -358,6 +364,14 @@ looked like saturation at the time; the October 27 runs show that four wallets
 were the limit. These are observations of this client on a shared network, not
 consensus benchmarks.
 
+Rendering, measured in Chromium on an Apple-silicon Mac (October 28): a local
+benchmark of the draw loop at 9,000–100,000 particles per second held 60 fps with
+WebGL (1–4 ms of CPU per frame), and Canvas 2D fell to 7–43 fps; with the CPU
+slowed 4× (a phone profile) Canvas 2D fell to 3–16 fps and WebGL still held 60.
+On the hosted app at devnet's limit, a 30-second drag ran at 57–61 fps, drew
+transfers at the confirmed rate (for example 44,903 per second as 8,980 particles),
+and kept 5,700 particles per second through a pause in submissions.
+
 Click feel, measured in Chromium against the hosted app: the first particle
 appears in the first frame (about 30 ms; about 300 ms before prediction and
 coordinator placement). A recorded drag that releases and keeps moving shows the
@@ -459,6 +473,7 @@ package and served from the app's origin. The font license is distributed at
 - `server/commands.ts`: runtime validation of browser control messages.
 - `shared/protocol.ts`: settings and telemetry types, with no browser SDK dependency.
 - `src/main.ts`: pointer/keyboard input, settings, and live UI.
-- `src/particles.ts`: bounded Canvas 2D renderer, particle stream, and prediction.
+- `src/particles.ts`: bounded particle stream, release rate, and prediction.
+- `src/particle-renderers.ts`: WebGL renderer and the Canvas 2D fallback.
 - `scripts/deploy.sh`: devnet deploy that waits for every object to run the new version.
 - `SPEC.md`, `docs/`: original specification and records of the earlier Node app.

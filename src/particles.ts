@@ -1,14 +1,30 @@
 import type { Point } from "../shared/protocol.js";
+import {
+  SLOT_FLOATS,
+  createRenderer,
+  palette,
+  type ParticleRenderer,
+} from "./particle-renderers.js";
 
-const capacity = 24_000;
-// Submitted batches arrive in pulses: devnet confirms in blocks every ~3 s, and at
-// its limit each block frees 100,000 or more in-flight slots at once. Particles are
-// released at the smoothed arrival rate instead, so a drag shows a continuous stream.
+const capacity = 30_000;
+/**
+ * One particle stands for this many transfers, so the spray grows and shrinks with
+ * throughput. Devnet's limit (~45k tx/s) is then ~9,000 particles/s, inside the pool.
+ */
+export const TRANSFERS_PER_PARTICLE = 5;
+// Submitted batches arrive in waves: at devnet's limit the in-flight cap fills, then
+// waits for receipts, which come in blocks of 100,000 or more every ~3 s. A spray
+// therefore submits in a ~10 s cycle while the confirmed rate stays level. Particles
+// are released at the confirmed rate once one is known, so the spray matches the
+// headline; before that, at the smoothed submission rate.
 const RATE_SECONDS = 2.5;
-// Release faster when needed so no more than this much is ever waiting. One block
-// time spreads a lump over the gap until the next; a shorter lag drew each lump as a
-// flash. Release discards the queue, so this adds no trail after the click ends.
-const MAX_LAG_SECONDS = 3;
+// Release faster when needed so no more than this much is ever waiting; it spans one
+// submission cycle. Release discards the queue, so this adds no trail after a click.
+const MAX_LAG_SECONDS = 12;
+// Release at the full rate only while this much is waiting, and slower below it, so a
+// pause in submissions (devnet sometimes confirms nothing for ~5 s) thins the spray
+// gradually instead of cutting it off.
+const RESERVE_SECONDS = 4;
 // Particles that arrive while nobody has held the canvas yet (a viewer joining
 // mid-spray) flush at a fixed fast rate.
 const FLUSH_SECONDS = 0.08;
@@ -16,8 +32,11 @@ const MIN_FLUSH_RATE = 40_000;
 // Particles live 1.2-3.6 s (2.4 s on average). Above this rate the pool would recycle
 // live particles, which pop out early; draw fewer particles per transfer instead.
 const POOL_RATE = (capacity / 2.4) * 0.8;
-// Frame budget for building and filling particle paths; slower devices draw fewer.
+// CPU budget per frame for drawing; slower devices draw fewer particles. WebGL stays
+// far inside it; the Canvas 2D fallback does not on phones at devnet's limit.
 const DRAW_BUDGET_MS = 8;
+// Particle times are float32 seconds from this epoch; rebase it before precision drops.
+const REBASE_SECONDS = 1_000;
 // A batch reaches the canvas ~200 ms after a click: the round trip plus signing the
 // first batch. While a browser holds, draw predicted particles at the recent rate
 // whenever nothing real is waiting; real arrivals pay them back instead of being
@@ -27,25 +46,19 @@ const PREDICT_AHEAD_SECONDS = 0.4;
 const FIRST_PREDICT_RATE = 4_000;
 // After release, late arrivals may still pay back predictions for this long.
 const PAYBACK_MS = 1_500;
-const palette = [
-  "#d6fa7c",
-  "#87e6a4",
-  "#5dd6cd",
-  "#75b5ed",
-  "#b195f7",
-  "#ef8bc7",
-  "#fa9b78",
-  "#f8d37a",
-];
 
 /**
- * Fixed storage. Each submitted transaction is represented once in `emitted`; at most
- * one particle is drawn for it, fewer when the rate or the frame budget requires.
+ * Fixed storage. Each submitted transaction is represented once in `emitted`; one
+ * particle is drawn per TRANSFERS_PER_PARTICLE, fewer when the pool or the frame
+ * budget requires.
  */
 export class ParticleCanvas {
-  private context: CanvasRenderingContext2D;
-  private data = new Float32Array(capacity * 8);
+  private renderer: ParticleRenderer;
+  private data = new Float32Array(capacity * SLOT_FLOATS);
   private cursor = 0;
+  /** Slots written since the renderer last received them start here. */
+  private uploaded = 0;
+  private epoch = performance.now();
   private width = 0;
   private height = 0;
   private lastTime = 0;
@@ -66,20 +79,22 @@ export class ParticleCanvas {
   private queued = 0;
   private arrived = 0;
   private rate = 0;
+  /** Confirmed transfers per second for the current spray; 0 until known. */
+  confirmedRate = 0;
+  private releaseRate = 0;
   private carry = 0;
   private aim: Point = { x: 0.5, y: 0.5 };
   private sequence = 0;
-  /** Particles drawn per transfer, lowered while frames run over budget. */
-  private frameDensity = 1;
+  /** Share of the fixed ratio drawn, lowered while frames run over budget. */
+  private frameShare = 1;
   private drawCarry = 0;
   private drawMs = 0;
   private drawn = 0;
   private frames = 0;
 
   constructor(private canvas: HTMLCanvasElement) {
-    const context = canvas.getContext("2d", { alpha: true });
-    if (!context) throw new Error("Your browser could not create a 2D canvas");
-    this.context = context;
+    this.renderer = createRenderer(canvas);
+    canvas.dataset.renderer = this.renderer.name;
     this.resize();
     window.addEventListener("resize", () => this.resize());
     this.frame = requestAnimationFrame((time) => this.draw(time));
@@ -135,19 +150,21 @@ export class ParticleCanvas {
       this.predict(seconds);
       return;
     }
+    const target = this.confirmedRate || this.rate;
     const perSecond = this.held
-      ? Math.max(this.rate, this.queued / MAX_LAG_SECONDS)
+      ? Math.max(
+          Math.min(target, this.queued / RESERVE_SECONDS),
+          this.queued / MAX_LAG_SECONDS,
+        )
       : Math.max(MIN_FLUSH_RATE, this.queued / FLUSH_SECONDS);
+    this.releaseRate = perSecond;
     const exact = perSecond * seconds + this.carry;
     const count = Math.min(this.queued, Math.floor(exact));
     this.carry = count < this.queued ? exact - count : 0;
     if (count === 0) return;
     this.queued -= count;
-    // Bound by the release rate too: a burst must not recycle live particles.
-    const density = Math.min(
-      this.frameDensity,
-      POOL_RATE / Math.max(this.rate, perSecond, 1),
-    );
+    // Bound by the release rate: a burst must not recycle live particles.
+    const density = this.density(perSecond);
     const drawn = count * density + this.drawCarry;
     this.drawCarry = drawn - Math.floor(drawn);
     this.emit(Math.floor(drawn), count, this.aim, this.sequence);
@@ -167,8 +184,20 @@ export class ParticleCanvas {
     const count = Math.floor(exact);
     this.predictCarry = exact - count;
     this.predicted += count;
-    const density = Math.min(this.frameDensity, POOL_RATE / rate);
-    this.emit(Math.floor(count * density), 0, this.aim, this.sequence);
+    this.emit(
+      Math.floor(count * this.density(rate)),
+      0,
+      this.aim,
+      this.sequence,
+    );
+  }
+
+  /** Particles per transfer: the fixed ratio, lowered for the pool and frame budget. */
+  private density(transfersPerSecond: number): number {
+    return Math.min(
+      this.frameShare / TRANSFERS_PER_PARTICLE,
+      POOL_RATE / Math.max(transfersPerSecond, 1),
+    );
   }
 
   /** Count transfers as represented without drawing them. */
@@ -184,10 +213,11 @@ export class ParticleCanvas {
     sequence: number,
   ): void {
     const now = performance.now();
+    const birth = (now - this.epoch) / 1000;
     const previous =
       this.previous && now - this.lastEmission < 200 ? this.previous : point;
     for (let i = 0; i < count; i++) {
-      const offset = (this.cursor++ % capacity) * 8;
+      const offset = (this.cursor++ % capacity) * SLOT_FLOATS;
       const t = Math.random();
       const angle = Math.random() * Math.PI * 2;
       const velocity = 45 + Math.random() ** 1.5 * 340;
@@ -197,11 +227,11 @@ export class ParticleCanvas {
         (previous.y + (point.y - previous.y) * t) * this.height;
       this.data[offset + 2] = Math.cos(angle) * velocity;
       this.data[offset + 3] = Math.sin(angle) * velocity;
-      this.data[offset + 4] = 1.2 + Math.random() * 2.4;
-      this.data[offset + 5] = this.data[offset + 4]!;
-      this.data[offset + 6] =
+      this.data[offset + 4] = birth;
+      this.data[offset + 5] = 1.2 + Math.random() * 2.4;
+      this.data[offset + 6] = 0.7 + Math.random() ** 3 * 2.2;
+      this.data[offset + 7] =
         Math.floor(sequence / 160 + Math.random() * 2) % palette.length;
-      this.data[offset + 7] = 0.7 + Math.random() ** 3 * 2.2;
     }
     this.previous = point;
     this.lastEmission = now;
@@ -214,7 +244,7 @@ export class ParticleCanvas {
 
   clear(): void {
     this.data.fill(0);
-    this.context.clearRect(0, 0, this.width, this.height);
+    this.uploaded = this.cursor - capacity;
     this.previous = null;
     this.queued = 0;
     this.carry = 0;
@@ -227,63 +257,50 @@ export class ParticleCanvas {
     const ratio = Math.min(devicePixelRatio, 2);
     this.canvas.width = Math.round(this.width * ratio);
     this.canvas.height = Math.round(this.height * ratio);
-    this.context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    this.renderer.resize(this.width, this.height, ratio);
+  }
+
+  /** Hands the renderer every slot written since the last frame. */
+  private upload(): void {
+    const pending = Math.min(this.cursor - this.uploaded, capacity);
+    if (pending <= 0) return;
+    // After clear() or a rebase this reaches back a whole pool, before slot 0 on a
+    // new page; wrap it into range.
+    const from = (((this.cursor - pending) % capacity) + capacity) % capacity;
+    const to = from + pending;
+    this.renderer.upload(this.data, from, Math.min(to, capacity));
+    if (to > capacity) this.renderer.upload(this.data, 0, to - capacity);
+    this.uploaded = this.cursor;
   }
 
   private draw(time: number): void {
     const elapsed = (time - (this.lastTime || time)) / 1000;
-    const dt = Math.min(elapsed, 0.04);
     this.lastTime = time;
     // Release on real time (capped after a background tab) so the queue keeps pace.
     this.release(Math.min(elapsed, 0.25));
     const started = performance.now();
-    const c = this.context;
-    c.globalCompositeOperation = "source-over";
-    c.clearRect(0, 0, this.width, this.height);
-    c.globalCompositeOperation = "lighter";
-    // One pass over the pool, one path per color.
-    const paths = palette.map(() => new Path2D());
-    const decay = Math.exp(-dt * 0.8);
-    for (let i = 0; i < capacity; i++) {
-      const o = i * 8;
-      if (this.data[o + 4]! <= 0) continue;
-      this.data[o + 4] = this.data[o + 4]! - dt;
-      if (!this.reducedMotion) {
-        const vx = this.data[o + 2]!;
-        const vy = this.data[o + 3]!;
-        this.data[o] = this.data[o]! + vx * dt;
-        this.data[o + 1] = this.data[o + 1]! + vy * dt;
-        this.data[o + 2] = vx * decay;
-        this.data[o + 3] = vy * decay;
-      }
-      const life = Math.max(0, this.data[o + 4]! / this.data[o + 5]!);
-      const radius = this.data[o + 7]! * Math.sqrt(life);
-      const x = this.data[o]!;
-      const y = this.data[o + 1]!;
-      const path = paths[this.data[o + 6]!]!;
-      path.moveTo(x + radius, y);
-      path.arc(x, y, radius, 0, Math.PI * 2);
+    let now = (started - this.epoch) / 1000;
+    if (now > REBASE_SECONDS) {
+      for (let o = 4; o < this.data.length; o += SLOT_FLOATS)
+        this.data[o] = this.data[o]! - REBASE_SECONDS;
+      this.epoch += REBASE_SECONDS * 1000;
+      now -= REBASE_SECONDS;
+      this.uploaded = this.cursor - capacity;
     }
-    for (let color = 0; color < palette.length; color++) {
-      c.fillStyle = palette[color]!;
-      c.fill(paths[color]!);
-    }
+    this.upload();
+    this.renderer.draw(this.data, now, this.reducedMotion ? 0 : 1);
     // Keep drawing within budget: shed particles quickly, recover slowly.
     const cost = performance.now() - started;
     this.drawMs += (cost - this.drawMs) * 0.05;
     if (++this.frames % 30 === 0) {
       // Diagnostics for tests and devtools: smoothed draw cost and density.
       this.canvas.dataset.drawMs = this.drawMs.toFixed(1);
-      this.canvas.dataset.density = Math.min(
-        this.frameDensity,
-        POOL_RATE / Math.max(this.rate, 1),
-      ).toFixed(2);
+      this.canvas.dataset.density = this.density(this.releaseRate).toFixed(2);
     }
     if (cost > DRAW_BUDGET_MS)
-      this.frameDensity = Math.max(0.1, this.frameDensity * 0.9);
+      this.frameShare = Math.max(0.1, this.frameShare * 0.9);
     else if (cost < DRAW_BUDGET_MS / 2)
-      this.frameDensity = Math.min(1, this.frameDensity * 1.02);
-    c.globalCompositeOperation = "source-over";
+      this.frameShare = Math.min(1, this.frameShare * 1.02);
     this.frame = requestAnimationFrame((next) => this.draw(next));
   }
 

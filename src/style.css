@@ -305,6 +305,8 @@ kbd {
   top: 100px;
   left: 50%;
   transform: translateX(-50%);
+  /* At left: 50% the box would shrink to half the screen; size it to the text. */
+  width: max-content;
   max-width: calc(100% - 40px);
   padding: 5px 12px;
   font-family: ui-monospace, monospace;
