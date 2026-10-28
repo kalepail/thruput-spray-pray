@@ -35,6 +35,10 @@ let lastSent = 0;
 let noticeTimer: ReturnType<typeof setTimeout>;
 let dirty = false;
 const history: number[] = [];
+/** True once this spray has a confirmed rate; until then the headline shows sends. */
+let confirmedThisSpray = false;
+/** When this browser first saw the current spray, and the attempts counted then. */
+let sprayStart: { time: number; attempted: number } | null = null;
 /** The HUD graph: confirmed and sent rates for the last 60 seconds. */
 const GRAPH_MS = 60_000;
 const rates: { time: number; confirmed: number; sent: number }[] = [];
@@ -247,8 +251,32 @@ function update(snapshot: Snapshot): void {
       ? "Devnet is at capacity. New transfers go out as blocks confirm; none are dropped."
       : state.message;
   if (status.textContent !== message) status.textContent = message;
+  // The first receipts take ~10 s at devnet's limit. Until then the headline shows
+  // the average send rate since the spray started, labelled as such, instead of a
+  // zero that looks broken. The 5 s send rate falls to 0 before then, because sends
+  // wait at the in-flight cap.
+  if (!spraying) {
+    confirmedThisSpray = false;
+    sprayStart = null;
+  } else {
+    sprayStart ??= { time: Date.now(), attempted: state.attempted };
+    if (state.liveTps > 0) confirmedThisSpray = true;
+  }
+  const sendingFirst = spraying && !confirmedThisSpray;
+  const sentRate = sprayStart
+    ? ((state.attempted - sprayStart.attempted) * 1000) /
+      Math.max(Date.now() - sprayStart.time, 1000)
+    : 0;
+  const label = sendingFirst ? "SENDING TX / SEC" : "CONFIRMED TX / SEC";
+  const note = sendingFirst
+    ? "Waiting for the first block to confirm"
+    : "Last 2 confirmed blocks";
+  if (element("rate-label").textContent !== label)
+    element("rate-label").textContent = label;
+  if (element("rate-note").textContent !== note)
+    element("rate-note").textContent = note;
   const metrics: Record<string, number> = {
-    "live-tps": state.liveTps,
+    "live-tps": sendingFirst ? sentRate : state.liveTps,
     "total-confirmed": state.succeeded,
     "average-tps": state.averageTps,
     "submit-tps": state.submitTps,

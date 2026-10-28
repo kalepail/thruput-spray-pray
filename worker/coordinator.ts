@@ -295,9 +295,10 @@ export class SprayPray extends DurableObject<Env> {
    * every 500 ms while nothing is pending, the chain tip.
    */
   private readChainTimes(): void {
-    const frontier = this.frontier(this.pendingNow());
-    if (frontier !== undefined)
-      for (let h = frontier - 1n; h <= frontier + 1n; h++)
+    const window = this.rateWindow(this.pendingNow());
+    const frontier = window?.last;
+    if (window)
+      for (let h = window.first; h <= window.last + 1n; h++)
         if (h > 0n) void this.readTimepoint(String(h));
     for (const height of [...this.timepoints.keys()])
       if (frontier !== undefined && BigInt(height) < frontier - 8n)
@@ -383,6 +384,40 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
+   * The blocks the headline counts: the frontier and the block before it, but none
+   * from before this spray's first block. While that first block is the only one
+   * reported, it is counted alone, before the next block confirms it complete. Its
+   * receipts are still arriving then, so the first value can start low and rise;
+   * waiting for the next block's receipts added about 3.5 s at devnet's limit.
+   */
+  private rateWindow(
+    pending: number,
+  ): { first: bigint; last: bigint } | undefined {
+    let first: bigint | undefined;
+    for (const [height, seenAt] of this.seen)
+      if (
+        seenAt >= this.sprayStartedAt &&
+        (first === undefined || BigInt(height) < first)
+      )
+        first = BigInt(height);
+    // Sending, but no block of this spray reported yet: the rate is not known.
+    if (pending > 0 && this.owner && first === undefined) return undefined;
+    let last = this.frontier(pending);
+    if (
+      pending > 0 &&
+      first !== undefined &&
+      (last === undefined || last < first)
+    )
+      last = first;
+    if (last === undefined || last < 2n) return undefined;
+    const start = last - 1n;
+    return {
+      first: first !== undefined && first > start ? first : start,
+      last,
+    };
+  }
+
+  /**
    * Confirmed transfers per second over the last two complete chain blocks: our
    * successful transfers in those blocks divided by their chain time. Blocks are
    * taken by chain height, so a block with none of our transfers counts as zero and
@@ -391,21 +426,21 @@ export class SprayPray extends DurableObject<Env> {
    * shorter time window would swing with block timing.
    */
   private blockRate(counts: Map<string, number>, pending: number): number {
-    const frontier = this.frontier(pending);
-    if (frontier === undefined || frontier < 2n) return 0;
+    const window = this.rateWindow(pending);
+    if (window === undefined) return 0;
     // Nothing reported for a while although transfers are pending: none confirm now.
     const newest = Math.max(0, ...this.seen.values());
     if (pending > 0 && Date.now() - newest > STALL_MS) return 0;
     // A block's time point is when it starts, and its work fills the time until the
     // next one starts: blocks f-1 and f run from the start of f-1 to the start of f+1.
-    const start = this.timepoints.get(String(frontier - 1n));
-    const end = this.timepoints.get(String(frontier + 1n));
+    const start = this.timepoints.get(String(window.first));
+    const end = this.timepoints.get(String(window.last + 1n));
     // Until both chain times are read (one RPC round trip), keep the last value.
     if (end === undefined || start === undefined || end <= start)
       return this.lastRate;
-    const confirmed =
-      (counts.get(String(frontier - 1n)) ?? 0) +
-      (counts.get(String(frontier)) ?? 0);
+    let confirmed = 0;
+    for (let h = window.first; h <= window.last; h++)
+      confirmed += counts.get(String(h)) ?? 0;
     this.lastRate = (confirmed * 1000) / (end - start);
     return this.lastRate;
   }
@@ -502,7 +537,10 @@ export class SprayPray extends DurableObject<Env> {
         "Another browser is spraying. Try again when it finishes.",
       );
     const starting = this.owner === null;
-    if (starting) this.sprayStartedAt = Date.now();
+    if (starting) {
+      this.sprayStartedAt = Date.now();
+      this.lastRate = 0;
+    }
     this.owner = id;
     this.point = point;
     this.heartbeat = Date.now();
