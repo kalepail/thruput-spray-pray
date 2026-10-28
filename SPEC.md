@@ -20,8 +20,9 @@ work; the browser handles input, rendering, and live telemetry.
 - Use the native HOG token's generated ERC20 binding. Each transaction transfers
   one base unit to the next wallet in a ring of `SPRAY_WALLETS` wallets. Every wallet
   acts as sender and receiver. This exercises actual token balances.
-- Derive repeatable, public development keys from a fixed experiment seed on the
-  server. No wallet connection or browser signing. These keys hold test HOG only.
+- Derive repeatable development keys from a seed on the server. Local runs use a
+  fixed public seed; the hosted app reads its seed from a Worker secret. No wallet
+  connection or browser signing. These keys hold test HOG only.
 - Default to Futurenet at `https://rpc.thruput.network`, with the verified network
   identity pinned. Provision the wallet pool through the Futurenet faucet and
   verify funding before enabling the canvas. Localnet remains an explicit option.

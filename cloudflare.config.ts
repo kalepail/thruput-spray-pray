@@ -66,15 +66,16 @@ export default defineConfig(({ mode }) => {
         SPRAY_WALLETS: bindings.text(tuned("24", "4", "SPRAY_WALLETS")),
         // Lanes per run; a multiple of the wallets. Each lane uses one core.
         SPRAY_LANES: bindings.text(tuned("48", "8", "SPRAY_LANES")),
-        // Public test keys. The hosted app uses its own seed so local runs never share
-        // its wallets or Futurenet's in-flight budget for them.
-        SPRAY_WALLET_SEED: bindings.text(
-          tuned(
-            "spray-and-pray/hosted-worker/v1",
-            "spray-and-pray/local-demo/v1",
-            "SPRAY_WALLET_SEED",
-          ),
-        ),
+        // Local runs use public test keys. The hosted app reads its seed from a Worker
+        // secret, so local runs never share its wallets or Futurenet's in-flight
+        // budget for them, and nobody else can sign for them. A test deploy can set
+        // its own seed in the shell.
+        SPRAY_WALLET_SEED:
+          futurenet && !shell.SPRAY_WALLET_SEED
+            ? bindings.secret()
+            : bindings.text(
+                shell.SPRAY_WALLET_SEED ?? "spray-and-pray/local-demo/v1",
+              ),
         SPRAY_BATCH_SIZE: bindings.text("256"),
         SPRAY_CONCURRENCY: bindings.text(
           tuned("96", "32", "SPRAY_CONCURRENCY"),

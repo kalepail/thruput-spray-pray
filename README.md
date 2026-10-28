@@ -24,10 +24,9 @@ and transactions; it does not invoke the CLI.
 
 ### 1. Install
 
-From the `groundhog-experiments` repository root:
-
 ```sh
-cd spray-pray
+git clone https://github.com/kalepail/thruput-spray-pray.git
+cd thruput-spray-pray
 npm ci
 ```
 
@@ -320,7 +319,21 @@ across a deploy; each request carries the Worker's version timestamp, and an old
 object resets itself. Browsers reconnect on their own. Set `SPRAY_PRAY_URL` when
 the account's `workers.dev` URL differs from the default in the script.
 
-The hosted app uses its own wallet seed, so local runs never share its wallets. The
+The hosted app uses its own wallet seed, so local runs never share its wallets. That
+seed is the Worker secret `SPRAY_WALLET_SEED`, not a value in this repository,
+because anyone with the seed can sign for the hosted wallets. A lane on Futurenet
+refuses to start without it. Set it once with the first deploy, or again to rotate
+the wallets (fresh wallets fund themselves from the faucet on the next spray):
+
+```sh
+umask 077 && mkdir -p .local
+printf '{"SPRAY_WALLET_SEED":"%s"}\n' "$(openssl rand -hex 32)" > .local/secrets.json
+SPRAY_SECRETS_FILE=.local/secrets.json npm run deploy
+rm .local/secrets.json
+```
+
+Later deploys keep the secret. A test deploy that sets `SPRAY_WALLET_SEED` in the
+shell uses that value as a plain variable instead. The
 coordinator stops after 30 idle minutes and lanes stop 2 minutes after their last
 report; statistics reset when objects restart.
 

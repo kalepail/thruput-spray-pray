@@ -83,6 +83,11 @@ export class SprayLane extends DurableObject<Env> {
     this.coordinatorName = lane.coordinator;
     if (!this.engine) {
       const vars = this.env as unknown as Record<string, unknown>;
+      const walletSeed =
+        (vars.SPRAY_WALLET_SEED as string | undefined) || undefined;
+      // The default seed is public; on Futurenet anyone could sign for its wallets.
+      if (!walletSeed && this.env.THRUPUT_NETWORK === "futurenet")
+        throw new Error("SPRAY_WALLET_SEED is required on Futurenet");
       // The socket pool speaks TLS; a local node over plain HTTP uses fetch().
       const sockets = this.env.THRUPUT_RPC_URL.startsWith("https:")
         ? Number(vars.SPRAY_RPC_SOCKETS ?? 0)
@@ -110,8 +115,7 @@ export class SprayLane extends DurableObject<Env> {
                 allowUnconfirmed: true,
               }),
           },
-          walletSeed:
-            (vars.SPRAY_WALLET_SEED as string | undefined) || undefined,
+          walletSeed,
           post: sockets
             ? socketPool(this.env.THRUPUT_RPC_URL, sockets).post
             : undefined,
