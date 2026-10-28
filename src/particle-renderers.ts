@@ -6,7 +6,6 @@
 export const SLOT_FLOATS = 8;
 /** Velocity decays as exp(-DRAG * age); position is its integral. */
 export const DRAG = 0.8;
-/** Spray colors first; the last entry marks confirmed transfers. */
 export const palette = [
   "#d6fa7c",
   "#87e6a4",
@@ -16,10 +15,7 @@ export const palette = [
   "#ef8bc7",
   "#fa9b78",
   "#f8d37a",
-  "#f3ffd2",
 ];
-export const SPRAY_COLORS = 8;
-export const CONFIRMED_COLOR = 8;
 
 export interface ParticleRenderer {
   readonly name: "webgl" | "2d";

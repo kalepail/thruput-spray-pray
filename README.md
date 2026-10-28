@@ -227,10 +227,7 @@ because receipt lookups scale with the number pending. The HUD shows the
 measured send-to-receipt time of the transfers confirmed in the last 5 s as
 "N s to confirm" (about 9–10 s at devnet's limit). The graph beside the headline
 plots the last 60 seconds: the confirmed rate as a filled line and the sent rate
-as a dashed line, so the gap between them is visible. On the canvas, each
-confirmation lights up the place where that transfer was sprayed, oldest first,
-so the trail you drew glows again as its blocks land, including after you let
-go.
+as a dashed line, so the gap between them is visible.
 
 #### Block time and send rate
 

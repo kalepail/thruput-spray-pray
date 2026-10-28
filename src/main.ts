@@ -35,8 +35,6 @@ let lastSent = 0;
 let noticeTimer: ReturnType<typeof setTimeout>;
 let dirty = false;
 const history: number[] = [];
-/** Successful transfers in the last state, to light up new confirmations. */
-let lastSucceeded: number | undefined;
 /** The HUD graph: confirmed and sent rates for the last 60 seconds. */
 const GRAPH_MS = 60_000;
 const rates: { time: number; confirmed: number; sent: number }[] = [];
@@ -228,10 +226,6 @@ function update(snapshot: Snapshot): void {
   particles.held = held || (state.owner !== null && state.owner !== clientId);
   const spraying = state.phase === "spraying";
   particles.confirmedRate = spraying ? state.liveTps : 0;
-  // New confirmations light up where those transfers were sprayed. A drop is a reset.
-  if (lastSucceeded !== undefined && state.succeeded > lastSucceeded)
-    particles.confirm(state.succeeded - lastSucceeded);
-  lastSucceeded = state.succeeded;
   const working = spraying || state.pending > 0;
   rates.push({
     time: Date.now(),

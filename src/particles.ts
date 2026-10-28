@@ -1,9 +1,8 @@
 import type { Point } from "../shared/protocol.js";
 import {
-  CONFIRMED_COLOR,
   SLOT_FLOATS,
-  SPRAY_COLORS,
   createRenderer,
+  palette,
   type ParticleRenderer,
 } from "./particle-renderers.js";
 
@@ -19,13 +18,8 @@ function scaleFor(renderer: ParticleRenderer["name"], area: number) {
   if (area >= 600_000) return { transfersPerParticle: 4, life: 1.2 };
   return { transfersPerParticle: 5, life: 1.15 };
 }
-// Spray particles live 1.2-3.6 s (2.4 s on average) times the screen's life scale;
-// confirmation particles live 1-2.2 s (1.6 s). The pool holds both at the same rate.
+// Particles live 1.2-3.6 s (2.4 s on average) times the screen's life scale.
 const SPRAY_LIFE = 2.4;
-const CONFIRM_LIFE = 1.6;
-// Transfers waiting to confirm, with where they were sprayed; beyond this the oldest
-// are dropped (failed transfers never confirm).
-const MAX_LANDING = 2_000_000;
 // Submitted batches arrive in waves: at devnet's limit the in-flight cap fills, then
 // waits for receipts, which come in blocks of 100,000 or more every ~3 s. A spray
 // therefore submits in a ~10 s cycle while the confirmed rate stays level. Particles
@@ -61,8 +55,7 @@ const PAYBACK_MS = 1_500;
 /**
  * Fixed storage. Each submitted transaction is represented once in `emitted`; one
  * particle is drawn per `transfersPerParticle`, fewer when the pool or the frame
- * budget requires. When transfers confirm, the places where they were sprayed light
- * up, oldest first, at the same scale.
+ * budget requires.
  */
 export class ParticleCanvas {
   private renderer: ParticleRenderer;
@@ -72,11 +65,6 @@ export class ParticleCanvas {
   private poolRate = 0;
   transfersPerParticle = 5;
   private life = 1;
-  private landing: { count: number; point: Point }[] = [];
-  private landingHead = 0;
-  private landingTotal = 0;
-  private confirmCarry = 0;
-  private confirmed = 0;
   private cursor = 0;
   /** Slots written since the renderer last received them start here. */
   private uploaded = 0;
@@ -156,67 +144,6 @@ export class ParticleCanvas {
     this.arrived += count;
     this.aim = point;
     this.sequence = sequence;
-    this.landing.push({ count, point });
-    this.landingTotal += count;
-    while (this.landingTotal > MAX_LANDING) {
-      const oldest = this.landing[this.landingHead++]!;
-      this.landingTotal -= oldest.count;
-    }
-    this.compactLanding();
-  }
-
-  /**
-   * `transfers` more transfers confirmed: light up where the oldest waiting ones were
-   * sprayed. Confirmation order is close to submission order.
-   */
-  confirm(transfers: number): void {
-    this.confirmed += transfers;
-    this.canvas.dataset.confirmed = String(this.confirmed);
-    let left = transfers;
-    const density = this.density(Math.max(this.confirmedRate, 1));
-    while (left > 0 && this.landingHead < this.landing.length) {
-      const batch = this.landing[this.landingHead]!;
-      const take = Math.min(batch.count, left);
-      batch.count -= take;
-      this.landingTotal -= take;
-      left -= take;
-      if (batch.count === 0) this.landingHead++;
-      const exact = take * density + this.confirmCarry;
-      const count = Math.floor(exact);
-      this.confirmCarry = exact - count;
-      this.land(count, batch.point);
-    }
-    this.compactLanding();
-  }
-
-  private compactLanding(): void {
-    if (this.landingHead > 4096) {
-      this.landing = this.landing.slice(this.landingHead);
-      this.landingHead = 0;
-    }
-  }
-
-  /** Confirmation particles: small, pale, and slow, around the sprayed point. */
-  private land(count: number, point: Point): void {
-    const birth = (performance.now() - this.epoch) / 1000;
-    for (let i = 0; i < count; i++) {
-      const offset = (this.cursor++ % this.capacity) * SLOT_FLOATS;
-      const spread = Math.random() * 10;
-      const angle = Math.random() * Math.PI * 2;
-      const velocity = 8 + Math.random() * 32;
-      this.data[offset] = point.x * this.width + Math.cos(angle) * spread;
-      this.data[offset + 1] = point.y * this.height + Math.sin(angle) * spread;
-      this.data[offset + 2] = Math.cos(angle) * velocity;
-      this.data[offset + 3] = Math.sin(angle) * velocity;
-      this.data[offset + 4] = birth;
-      this.data[offset + 5] = 1 + Math.random() * 1.2;
-      this.data[offset + 6] = 0.6 + Math.random() ** 2 * 1.2;
-      this.data[offset + 7] = CONFIRMED_COLOR;
-    }
-    if (count) {
-      this.drawn += count;
-      this.canvas.dataset.drawn = String(this.drawn);
-    }
   }
 
   /** Where new particles appear; the spraying browser follows its own pointer. */
@@ -316,7 +243,7 @@ export class ParticleCanvas {
       this.data[offset + 5] = (1.2 + Math.random() * 2.4) * this.life;
       this.data[offset + 6] = 0.7 + Math.random() ** 3 * 2.2;
       this.data[offset + 7] =
-        Math.floor(sequence / 160 + Math.random() * 2) % SPRAY_COLORS;
+        Math.floor(sequence / 160 + Math.random() * 2) % palette.length;
     }
     this.previous = point;
     this.lastEmission = now;
@@ -331,9 +258,6 @@ export class ParticleCanvas {
     this.data.fill(0);
     this.uploaded = this.cursor - this.capacity;
     this.previous = null;
-    this.landing = [];
-    this.landingHead = 0;
-    this.landingTotal = 0;
     this.queued = 0;
     this.carry = 0;
     this.predicted = 0;
@@ -349,8 +273,7 @@ export class ParticleCanvas {
     const scale = scaleFor(this.renderer.name, this.width * this.height);
     this.transfersPerParticle = scale.transfersPerParticle;
     this.life = scale.life;
-    this.poolRate =
-      (this.capacity * 0.8) / (SPRAY_LIFE * this.life + CONFIRM_LIFE);
+    this.poolRate = (this.capacity * 0.8) / (SPRAY_LIFE * this.life);
   }
 
   /** Hands the renderer every slot written since the last frame. */
