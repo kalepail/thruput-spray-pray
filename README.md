@@ -565,3 +565,7 @@ package and served from the app's origin. The font license is distributed at
 - `src/particle-renderers.ts`: WebGL renderer and the Canvas 2D fallback.
 - `scripts/deploy.sh`: Futurenet deploy that waits for every object to run the new version.
 - `SPEC.md`, `docs/`: original specification and records of the earlier Node app.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
