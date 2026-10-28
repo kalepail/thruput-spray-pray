@@ -1,6 +1,6 @@
 # Where the 45k tx/s ceiling comes from
 
-Branch `test/bottleneck`. Started 2026-10-28.
+Started 2026-10-28 on branch `test/bottleneck`, since merged.
 
 ## Question
 

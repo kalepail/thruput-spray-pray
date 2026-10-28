@@ -332,6 +332,10 @@ Past 24 wallets, more load adds only receipt delay: devnet sustains about 45k
 tx/s for this workload. Blocks carry 100,000–400,000 transfers and arrive every
 2.8–3.2 s.
 
+The ramp that found this ceiling, and the plan behind it, are in
+[docs/MAX-TPS-PLAN.md](docs/MAX-TPS-PLAN.md). Tests of where the ceiling comes from
+(two independent sources, block periods) are in [docs/BOTTLENECK.md](docs/BOTTLENECK.md).
+
 `npm run test:latency` sends one marked transfer per second from its own wallet
 and times each step from the machine that runs it. Beside the 180-second
 hosted run:
@@ -415,6 +419,7 @@ npm run test:load      # 10-second run against the running app's selected networ
 npm run test:latency   # Times one transfer per second through commit and receipt
 npm run test:lease     # A second browser is refused; the lease passes on release
 npm run test:security  # Public endpoints, cross-origin WebSocket, same-origin font
+npm run watch:blocks   # Records each block period and size; WATCH_SECONDS, WATCH_OUTPUT
 ```
 
 For a longer run:
