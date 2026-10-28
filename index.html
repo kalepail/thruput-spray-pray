@@ -257,8 +257,9 @@
           </p>
           <p>
             RPC acceptance is not success. Unresolved means no terminal receipt
-            was observed within 60 seconds. Test wallet keys are deterministic
-            and public. Session statistics live in server memory.
+            was observed within 60 seconds. Test wallet keys are deterministic;
+            the hosted app keeps its seed secret. Session statistics live in
+            server memory.
           </p>
           <p>
             Flow control pauses new submissions while the outstanding-work
@@ -279,6 +280,13 @@
         <p class="panel-footnote">
           Experiment throughput.<br />Not a measure of total network throughput.
         </p>
+        <a
+          class="source-link"
+          href="https://github.com/kalepail/thruput-spray-pray"
+          target="_blank"
+          rel="noopener"
+          >Source on GitHub ↗</a
+        >
       </div>
     </dialog>
     <script type="module" src="/src/main.ts"></script>

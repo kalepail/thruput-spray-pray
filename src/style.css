@@ -698,6 +698,19 @@ summary {
 .panel-footnote {
   color: #778169;
 }
+.source-link {
+  align-self: flex-start;
+  /* Sit with the footnote rather than a full panel gap below it. */
+  margin-top: -16px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.source-link:hover,
+.source-link:focus-visible {
+  color: var(--accent);
+}
 .error-details {
   border-top: 1px solid rgb(240 160 130 / 20%);
   padding-top: 20px;
@@ -822,6 +835,7 @@ summary {
   .help,
   .measurement p,
   .panel-footnote,
+  .source-link,
   .checkbox-label,
   summary,
   .outcomes > div,
