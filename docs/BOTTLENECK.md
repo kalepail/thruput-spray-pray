@@ -44,22 +44,44 @@ period for the whole time.
 
 Runner: `test-results/bottleneck/run-matrix.sh` (ignored folder; results copied below).
 
-### Results
+### Results (2026-10-28, devnet 0.41.0)
 
-Not run yet. The first attempt on 2026-10-28 (00:11 local) was stopped after about 50 s of
-A alone, because another agent was running a sweep on the public app. Run test 1 only when
-no other load test is active on devnet.
+The public app was busy with other work, so the run used two private test Workers:
+B (`thruput-spray-pray-b`, seed `spray-and-pray/bottleneck-b/v1`) and C
+(`thruput-spray-pray-c`, seed `spray-and-pray/bottleneck-c/v1`). Devnet was idle before the
+start (2.03 s blocks). Rates are successful transfers divided by elapsed run time.
+
+| Run           | Succeeded | tx/s       | Tx per block | Block period | Receipt avg | Unresolved |
+| ------------- | --------- | ---------- | ------------ | ------------ | ----------- | ---------- |
+| B alone, 60 s | 2,788,992 | 41,552     | 126,772      | 2.83 s       | 7.8 s       | 0          |
+| C alone, 60 s | 2,818,560 | 42,887     | 128,116      | 2.88 s       | 7.5 s       | 0          |
+| B + C, 120 s  | 5,141,595 | **36,250** | ~51k each    | 2.65 s       | 18.4-18.8 s | 293        |
+
+During B + C, B resent 8,898 transfers and C resent 1,053. Both logged
+`Network connection lost.` and `Submission response was ambiguous`. 238 (B) and 55 (C)
+transfers stayed unresolved at the receipt deadline, so `test-load.ts` failed its check.
+
+**Conclusion:** the senders are not the limit. Two sources gave less in total than one
+source alone, and the receipts became more than twice as slow. More parallel servers will
+not raise the rate.
+
+The blocks also got shorter (2.65 s against 2.83-2.88 s) and carried fewer transfers. So
+during the combined run the chain received transfers more slowly. It did not execute
+bigger blocks. This points at the path into the chain (the one gateway, admission, and
+signature checks) more than at block execution. The node metrics in "Next tests" can
+confirm this.
 
 ## Next tests
 
-1. Chain metrics during a 45k soak, from the devnet team: `scheduler_pending_tx_count`,
+1. Chain metrics during a 45k soak, from the devnet team: `submit_unvetted_duration_seconds`,
+   `ingestion_auth_rpc_seconds`, gateway CPU and connection errors, `scheduler_pending_tx_count`,
    `nomination_duration_seconds`, `block_period_seconds`,
    `scheduler_global_lock_hold_seconds`, `validation_duration_seconds`,
    `commit_duration_seconds`, and CPU for each thread.
 2. Workload changes with one source: a lower declared gas than 100,000, a custom ERC20 in
    place of the native token, and unique receivers in place of the ring.
 3. Receipts sampled at 1 in 1,000, to take read load off the indexer.
-4. AWS senders in us-west-2, only if test 1 shows a sender limit.
+4. AWS senders in us-west-2: test 1 shows no sender limit, so skip this for throughput.
 
 ## Commands
 

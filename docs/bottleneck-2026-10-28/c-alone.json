@@ -1,0 +1,286 @@
+{
+  "date": "2026-10-28T00:45:19.974Z",
+  "durationMs": 60000,
+  "result": {
+    "phase": "ready",
+    "message": "Ready to spray",
+    "settings": {
+      "batchSize": 128,
+      "concurrency": 4
+    },
+    "walletCount": 24,
+    "owner": null,
+    "attempted": 2818560,
+    "accepted": 2818560,
+    "succeeded": 2818560,
+    "failed": 0,
+    "unresolved": 0,
+    "resubmitted": 0,
+    "pending": 0,
+    "liveTps": 44897.056199821585,
+    "submitTps": 0,
+    "sendingTps": 0,
+    "recentBlocks": [
+      {
+        "height": "14147",
+        "succeeded": 106567
+      },
+      {
+        "height": "14148",
+        "succeeded": 154553
+      },
+      {
+        "height": "14149",
+        "succeeded": 142720
+      },
+      {
+        "height": "14150",
+        "succeeded": 93824
+      },
+      {
+        "height": "14151",
+        "succeeded": 15104
+      }
+    ],
+    "averageTps": 42886.74852786781,
+    "averageTxPerBlock": 128116.36363636363,
+    "observedBlocks": 22,
+    "pendingLimit": 393216,
+    "averageReceiptMs": 7479.421980018165,
+    "elapsedMs": 65721,
+    "backpressure": false,
+    "errors": [],
+    "network": "Devnet",
+    "addresses": [
+      "evzSH9C8k7xrUNE3saH5iZQ1UdpU1bikTh3NgVzoPbE",
+      "5ZKp3ye4hAWu19vXnsFFAAiYRL6cS3RY5Jx9sdK8XvEq",
+      "AtJSJPxCMkAHsTxQUn5tF6LtNg9R4siyyRjc57HTZtH3",
+      "3d4GpH8LgMS4GY3eJSohWWz5zQegJrW7z5i69yU13HWR",
+      "EZnCNURG9zr3MTLdcr8vDiShXUWQyxM8qhxPn2Q3SQo5",
+      "7o9HySvcTciERAtusx29r3HcoQJctfVgqbeht5dqfJpt",
+      "D2dxUahCNTdx3jsogGkMHQhmoJVKDGfWkeyU4yrNZXro",
+      "FmepHFiSQdXK7ZLU6zbnuP5yZpR9KDDLePy9UwRuD17F",
+      "6ThQxv4KnpxejWrTzCeroAEgj5WYhv77zR9hwVQPeGEQ",
+      "8sccBaawJ8qPSMcs5p1q6F2u469QRh4NwUw2eejaqNMD",
+      "7PZesN8pTGmgNFk3gzDCZ6QU6HgzyRdAEEDHnSaiPB12",
+      "4jxNqcyfEvCRn4ygaBPUhm9ypwwVxbqjA1vDhBe8BBQ8",
+      "B9p7vmHd8a1FTDyN4bFnSNhqceEx9ddQAjSXJdHWW4Nq",
+      "FnicQqsPw6eT5fwPLxqqvuiT1saLdC1c1gb7PWYu2fDA",
+      "3h666n9UrUMNfUJtCYjCwqyGxvFHtqCwNQWxitonfBBi",
+      "HrQFqHW2qAnQTgsfLSt78i4wNx3firzwnwajEPQbRe5b",
+      "GZm8jNViMJzXj3c6goeJTaj6rc9yqyVoYq9tREKaS4bG",
+      "Gd27VCnMGs7isufJAQ3XW4VXhsbNfmGz8Nq6sEZFCRDJ",
+      "BXArugX5YWHqrwUtJVv1dLDYptLYsfBHyAsuskgCDyM3",
+      "FdKbmtpMN4TtDmToQH43jYEVbtm7dxygaLCBCyoveoo1",
+      "GQfit4nShrhcapWHnVtn5QJaUnJDs6WAwXorWVguoPiY",
+      "9A7ExoGcAtsWjVpSvMuVkgBXmN4ja7ovL1VDK41c1Vdm",
+      "dShix7wghKeqaJA1ByA6NsZA761HsWTqKNpw7Si9U9q",
+      "BLz9RhCgbWdTG9iA9rnDsNFotqbgWfRMzGWsAAYq8b92"
+    ],
+    "exportedAt": "2026-10-28T00:45:19.767Z",
+    "lanes": [
+      {
+        "colo": "SEA",
+        "rpcRttMs": 8
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 12
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 27
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 27
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 28
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 28
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 28
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 29
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 30
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 34
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 34
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 35
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 35
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 36
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 36
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 37
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 38
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 38
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 39
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 39
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 41
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 41
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 43
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 56
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 56
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 56
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 56
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 57
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 57
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 57
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 57
+      }
+    ],
+    "coordinator": {
+      "colo": "SEA",
+      "rpcRttMs": 9
+    },
+    "build": {
+      "version": "21a24db2-4dc8-40b3-8473-f4069abcbdf8",
+      "lanes": 48,
+      "lanesOnVersion": 48
+    },
+    "measurement": "Successful committed receipts observed by this experiment's lanes; experiment throughput, not global network TPS"
+  }
+}

@@ -1,0 +1,286 @@
+{
+  "date": "2026-10-28T00:43:10.855Z",
+  "durationMs": 60000,
+  "result": {
+    "phase": "ready",
+    "message": "Ready to spray",
+    "settings": {
+      "batchSize": 128,
+      "concurrency": 4
+    },
+    "walletCount": 24,
+    "owner": null,
+    "attempted": 2788992,
+    "accepted": 2788992,
+    "succeeded": 2788992,
+    "failed": 0,
+    "unresolved": 0,
+    "resubmitted": 0,
+    "pending": 0,
+    "liveTps": 39219.674468337886,
+    "submitTps": 0,
+    "sendingTps": 0,
+    "recentBlocks": [
+      {
+        "height": "14093",
+        "succeeded": 109952
+      },
+      {
+        "height": "14094",
+        "succeeded": 112640
+      },
+      {
+        "height": "14095",
+        "succeeded": 126336
+      },
+      {
+        "height": "14096",
+        "succeeded": 164736
+      },
+      {
+        "height": "14097",
+        "succeeded": 39040
+      }
+    ],
+    "averageTps": 41552.3241954708,
+    "averageTxPerBlock": 126772.36363636363,
+    "observedBlocks": 22,
+    "pendingLimit": 393216,
+    "averageReceiptMs": 7768.038929477029,
+    "elapsedMs": 67120,
+    "backpressure": false,
+    "errors": [],
+    "network": "Devnet",
+    "addresses": [
+      "GrjiMJyQqkiZrBURt26vAai6WHt63XMEmKBCR5N7wZuS",
+      "87C1JdUNVRv3Wa3dWjiEerBJpq2JzvguqkE5vZwBEKEx",
+      "EDMcCDQK6pC1bfjMFYUm8AG6GfVyNzxPsKmZGw672fgs",
+      "4q9RPADedyaNVfsuj5CJPd7BYwi1XR7WwPsJ95yYztn7",
+      "BYC2AfQz7x4N29QeALtf3G5FZZ8Y1jic6TsQF9bFFDfU",
+      "GVqJGzrw1UMMfgC3Xbum52NgTBSEFwZGeNhJfikT3HeZ",
+      "DD1Bfp3veTqPxnHZho52UJwSuQUMi5bE5jkAqUGYfsqe",
+      "3K3gphAbxDP7ZTgueq5LpSRBucWTT9ReeT8L9G798ydp",
+      "BFrFyDYzz2LyZpEumXbtcEzLuEfwgeresG9NPk2JWhoy",
+      "BZiFXW9wpJmjFNNDixk5M4k4mM5MiwB1tk5D5HX7mWAz",
+      "9JjT4UFDcV8j3giQvyVZxB27uaZef455BMvMZgV5gTFA",
+      "FWDGNXfrnjY5HsSH9EDUFtpMhg1nwCbhVgia6sFKaMkm",
+      "H8ursFQYYoFbnmHCHZYTQrLwz3piBpiqjrGctpWn2GYa",
+      "AGW6LQRdkkXeTcj7jhPKFPVXuGhNsrqpq2NbyLCh2c2a",
+      "2NG6qjtdSD4mxvBUvyGzakxoS4c2tdkrERmGFkuemmyL",
+      "4iFfWYywbLXiNwns8AjtqCdKktzsTbQiBVSzAT2TgLAw",
+      "D2BcwN47s958wBB3KdRChoBiJfTdFW5LQhzgQs9fKsZn",
+      "4KBxFPfkngRLG8qTCxZUt91R49srJ4CZQa2qLnNZ3WvC",
+      "BshseTcfNUV669M4qLxagdRCeTAEonGKaayVBGNZgRzo",
+      "FeoEcN9kAECdxeWAQUQHHpDv85sauCKTFphUP7UHx1em",
+      "E6E4BooruVQNK5FFNd9nDEWZdxV7WGVNyf3JPa2ihuNH",
+      "GyiTsJYEZfCPY53vyXd7geNwdP7ysiqzXWZoXQzGER8W",
+      "HKenCJSrti23mrh857gJ4wPPA8WGXvaxukELUprLNX3m",
+      "3XHxseV9jHQoPCMfsyfRiBnWUN9PwJCXAEhzfY41F4RU"
+    ],
+    "exportedAt": "2026-10-28T00:43:10.558Z",
+    "lanes": [
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 9
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 10
+      },
+      {
+        "colo": "SEA",
+        "rpcRttMs": 11
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 25
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 28
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 28
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 29
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 29
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 29
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 29
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 26
+      },
+      {
+        "colo": "SJC",
+        "rpcRttMs": 33
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 33
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 34
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 35
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 35
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 36
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 37
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 37
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 39
+      },
+      {
+        "colo": "LAX",
+        "rpcRttMs": 39
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 40
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 41
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 41
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 41
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 42
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 42
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 43
+      },
+      {
+        "colo": "DEN",
+        "rpcRttMs": 43
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 55
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 56
+      },
+      {
+        "colo": "DFW",
+        "rpcRttMs": 57
+      }
+    ],
+    "coordinator": {
+      "colo": "SEA",
+      "rpcRttMs": 8
+    },
+    "build": {
+      "version": "ff62985f-d84c-4b1e-bd9d-eeadbfeb9944",
+      "lanes": 48,
+      "lanesOnVersion": 48
+    },
+    "measurement": "Successful committed receipts observed by this experiment's lanes; experiment throughput, not global network TPS"
+  }
+}
