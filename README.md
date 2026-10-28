@@ -107,7 +107,8 @@ fills, generation pauses until receipts free capacity. This is not an execution
 error and does not drop submitted transfers.
 
 All browsers share one experiment and its statistics. Only one can spray at a
-time. Opening controls, losing focus, hiding the page, disconnecting, or missing
+time; the others watch that spray live. There is no queue: a refused browser
+presses again after the spray ends, and the first press wins. Opening controls, losing focus, hiding the page, disconnecting, or missing
 input heartbeats for 1.5 seconds stops new work. Reloading reconnects to the
 current totals; it does not replay old particles. Changing settings preserves
 cumulative statistics. Reset before comparing runs.
@@ -135,8 +136,9 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
   lane of each wallet calls the faucet; the other waits up to five minutes for
   the grant, because two calls for one recipient race.
 - **SprayPray** holds the browser WebSockets and the spray lease, forwards
-  heartbeats to the lanes, relays each submitted batch to browsers as particles,
-  and merges the lanes' reports into one snapshot.
+  heartbeats to the lanes, relays submitted batches to browsers as particles
+  (merged into one message every 50 ms), and merges the lanes' reports into one
+  snapshot.
 - **Placement** chooses the coordinator and the lane objects once. A Durable Object stays where it is
   created, and a `wnam` location hint lands anywhere in Western North America.
   Placement keeps the candidates with the shortest round trip to the RPC (devnet
@@ -456,6 +458,12 @@ package and served from the app's origin. The font license is distributed at
   and let receipts drain; inspect Recent diagnostics before another run.
 - **After prolonged use:** Apply configuration rechecks balances and tops up
   wallets below 1 HOG. Storage deposits are not transaction gas fees.
+- **Many visitors at once:** one coordinator object serves every browser on one
+  thread. It sends each browser about 20 particle messages and 10 state messages
+  a second, so the work grows with the number of viewers. The same thread handles
+  the sprayer's heartbeats; if it falls more than 1.5 seconds behind, the lease
+  expires and the spray stops. A spray also has no time limit, so one browser (or
+  a script that sends heartbeats) can hold the canvas for as long as it wants.
 
 ## Source map
 

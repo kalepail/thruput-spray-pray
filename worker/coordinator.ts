@@ -21,6 +21,8 @@ const FORWARD_MS = 250;
 // object can be evicted. Statistics start fresh on the next visit.
 const IDLE_MS = 30 * 60_000;
 const SETUP_RETRY_MS = 5_000;
+// Lane batches merge into one particle broadcast per window; see particles().
+const PARTICLE_FLUSH_MS = 50;
 
 type Lane = ReturnType<typeof laneStub>;
 
@@ -57,6 +59,9 @@ export class SprayPray extends DurableObject<Env> {
   private heartbeat = 0;
   private forwardedAt = 0;
   private sequence = 0;
+  /** Transfers from lane batches not yet sent to browsers as particles. */
+  private particleCount = 0;
+  private particleTimer?: ReturnType<typeof setTimeout>;
   private blocks = new Set<string>();
   /** Per lane, how many of its block heights this object has merged. */
   private cursors: number[] = [];
@@ -246,10 +251,24 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
-   * A lane submitted a batch: draw it now, where the pointer is now. One burst per
-   * batch keeps the upstream feel of a trail that follows a drag.
+   * A lane submitted a batch. Batches arrive about 350 times a second at devnet's
+   * limit, and each broadcast goes to every browser on this one thread, so batches
+   * merge into one burst per PARTICLE_FLUSH_MS, drawn where the pointer is then.
+   * Browsers draw each burst along the path from the previous one, so the trail still
+   * follows a drag.
    */
   particles(count: number): void {
+    this.particleCount += count;
+    this.particleTimer ??= setTimeout(
+      () => this.flushParticles(),
+      PARTICLE_FLUSH_MS,
+    );
+  }
+
+  private flushParticles(): void {
+    this.particleTimer = undefined;
+    const count = this.particleCount;
+    this.particleCount = 0;
     this.sequence += count;
     this.broadcast({
       type: "particles",

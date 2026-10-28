@@ -64,7 +64,8 @@ function start(): void {
     return;
   }
   if (state.owner && state.owner !== clientId) {
-    notify("Another browser is spraying. Your turn is next.");
+    // There is no queue: the next press after the release wins.
+    notify("Another browser is spraying. Try again when it finishes.");
     return;
   }
   held = true;
