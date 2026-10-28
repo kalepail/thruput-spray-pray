@@ -67,7 +67,12 @@ export class SprayPray extends DurableObject<Env> {
   private cursors: number[] = [];
   /** When each block height with our transfers was first reported by any lane. */
   private seen = new Map<string, number>();
+  /** Chain start time of each seen height, in ms, read with getBlockByHeight. */
+  private timepoints = new Map<string, number>();
+  private timepointReads = new Set<string>();
   private sprayStartedAt = 0;
+  /** Successful transfers when the current spray began. */
+  private sprayBaseline = 0;
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -214,8 +219,11 @@ export class SprayPray extends DurableObject<Env> {
         for (const height of [...this.seen.keys()].slice(
           0,
           this.seen.size - 32,
-        ))
+        )) {
           this.seen.delete(height);
+          this.timepoints.delete(height);
+        }
+      for (const height of this.seen.keys()) void this.readTimepoint(height);
       const state = this.snapshot();
       this.broadcast({ type: "state", state });
       this.stopIfIdle(state);
@@ -237,6 +245,39 @@ export class SprayPray extends DurableObject<Env> {
     else if (Date.now() - this.lastActive > IDLE_MS) {
       if (this.timer !== undefined) clearInterval(this.timer);
       this.timer = undefined;
+    }
+  }
+
+  /**
+   * Reads a block's chain time once. Receipts reach us at polling time, which jitters
+   * the interval between blocks; the chain time does not. A block the index has not
+   * stored yet is read again on a later tick.
+   */
+  private async readTimepoint(height: string): Promise<void> {
+    if (this.timepoints.has(height) || this.timepointReads.has(height)) return;
+    this.timepointReads.add(height);
+    try {
+      const response = await fetch(String(this.env.THRUPUT_RPC_URL), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getBlockByHeight",
+          params: { blockHeight: height },
+        }),
+        signal: AbortSignal.timeout(LANE_CALL_MS),
+      });
+      const body = (await response.json()) as {
+        result?: { blockTimepoint?: string } | null;
+      };
+      const nanos = body.result?.blockTimepoint;
+      if (nanos && this.seen.has(height))
+        this.timepoints.set(height, Number(BigInt(nanos) / 1_000_000n));
+    } catch {
+      // The observed time stands in until a read succeeds.
+    } finally {
+      this.timepointReads.delete(height);
     }
   }
 
@@ -279,11 +320,12 @@ export class SprayPray extends DurableObject<Env> {
   }
 
   /**
-   * Confirmed transfers per second over the last three completed blocks. Receipts
-   * arrive in block-sized lumps (25-40k every ~2.5 s), so any short time window
-   * swings with block timing; a block-to-block rate is accurate as soon as two blocks
-   * land. Undefined until then, and once blocks stop, so the caller falls back to the
-   * lanes' trailing-window rate, which decays to zero.
+   * Confirmed transfers per second over the last two completed blocks. Receipts
+   * arrive in block-sized lumps (100k or more every ~3 s at devnet's limit), so any
+   * short time window swings with block timing; a block-to-block rate is accurate as
+   * soon as two blocks land. Intervals use the chain's block times when both ends are
+   * known, else the time our lanes first saw each block. Undefined until two blocks
+   * land, and once blocks stop, so the caller falls back.
    */
   private blockRate(
     counts: Map<string, number>,
@@ -299,11 +341,15 @@ export class SprayPray extends DurableObject<Env> {
     // While transfers are in flight the newest block may still be collecting receipts.
     const complete = working ? heights.slice(0, -1) : heights;
     // The rate needs the block before the counted ones as the start of its interval.
-    const counted = complete.slice(Math.max(1, complete.length - 3));
+    const counted = complete.slice(Math.max(1, complete.length - 2));
     const before = heights[heights.indexOf(counted[0]!) - 1];
     if (!counted.length || !before) return undefined;
-    const seconds =
-      (this.seen.get(counted.at(-1)!)! - this.seen.get(before)!) / 1000;
+    const last = counted.at(-1)!;
+    const chain =
+      this.timepoints.has(last) && this.timepoints.has(before)
+        ? this.timepoints
+        : this.seen;
+    const seconds = (chain.get(last)! - chain.get(before)!) / 1000;
     if (seconds <= 0) return undefined;
     return counted.reduce((n, h) => n + counts.get(h)!, 0) / seconds;
   }
@@ -364,12 +410,15 @@ export class SprayPray extends DurableObject<Env> {
       unresolved: sum((s) => s.unresolved),
       resubmitted: sum((s) => s.resubmitted),
       pending,
-      // Before two blocks land, the average since the spray began rises smoothly;
-      // after work ends, the trailing window decays to zero.
+      // Before two blocks land, this spray's own average rises from zero; it never
+      // starts from the last spray's rate. After a release, the lanes' trailing window
+      // decays to zero.
       liveTps:
-        (this.blockRate(byHeight, working) ??
-          (working && elapsedMs ? (succeeded * 1000) / elapsedMs : 0)) ||
-        sum((s) => s.liveTps),
+        this.blockRate(byHeight, working) ??
+        (this.owner
+          ? ((succeeded - this.sprayBaseline) * 1000) /
+            Math.max(1_000, Date.now() - this.sprayStartedAt)
+          : sum((s) => s.liveTps)),
       submitTps: sum((s) => s.submitTps),
       sendingTps: sum((s) => s.sendingTps),
       recentBlocks: [...byHeight]
@@ -400,7 +449,10 @@ export class SprayPray extends DurableObject<Env> {
         "Another browser is spraying. Try again when it finishes.",
       );
     const starting = this.owner === null;
-    if (starting) this.sprayStartedAt = Date.now();
+    if (starting) {
+      this.sprayStartedAt = Date.now();
+      this.sprayBaseline = state.succeeded;
+    }
     this.owner = id;
     this.point = point;
     this.heartbeat = Date.now();
@@ -447,6 +499,7 @@ export class SprayPray extends DurableObject<Env> {
     );
     this.blocks.clear();
     this.seen.clear();
+    this.timepoints.clear();
     this.errors = [];
     this.cursors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.

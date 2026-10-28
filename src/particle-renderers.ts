@@ -6,6 +6,7 @@
 export const SLOT_FLOATS = 8;
 /** Velocity decays as exp(-DRAG * age); position is its integral. */
 export const DRAG = 0.8;
+/** Spray colors first; the last entry marks confirmed transfers. */
 export const palette = [
   "#d6fa7c",
   "#87e6a4",
@@ -15,7 +16,10 @@ export const palette = [
   "#ef8bc7",
   "#fa9b78",
   "#f8d37a",
+  "#f3ffd2",
 ];
+export const SPRAY_COLORS = 8;
+export const CONFIRMED_COLOR = 8;
 
 export interface ParticleRenderer {
   readonly name: "webgl" | "2d";
@@ -51,7 +55,7 @@ uniform float now;
 uniform float motion;
 uniform vec2 size;
 uniform float ratio;
-uniform vec3 palette[8];
+uniform vec3 palette[${palette.length}];
 varying vec3 tint;
 varying float diameter;
 void main() {
@@ -67,7 +71,7 @@ void main() {
   gl_Position = vec4(p.x / size.x * 2.0 - 1.0, 1.0 - p.y / size.y * 2.0, 0.0, 1.0);
   int index = int(color);
   tint = palette[0];
-  for (int i = 1; i < 8; i++) if (i == index) tint = palette[i];
+  for (int i = 1; i < ${palette.length}; i++) if (i == index) tint = palette[i];
 }`;
 
 const FRAGMENT = `

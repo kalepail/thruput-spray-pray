@@ -185,8 +185,9 @@ pause.
 
 The canvas draws with **WebGL**: the GPU computes each particle's position from its
 spawn values and age, so the CPU uploads only new particles. Without a hardware GPU
-it falls back to Canvas 2D (`?renderer=2d` forces it). Both use one fixed
-**30,000-particle** pool and the same motion, and cap device-pixel ratio at 2.
+it falls back to Canvas 2D (`?renderer=2d` forces it). Both use the same motion and
+cap device-pixel ratio at 2; WebGL uses a **160,000-particle** pool, Canvas 2D a
+30,000-particle pool.
 
 ## Reading the numbers
 
@@ -198,16 +199,26 @@ it falls back to Canvas 2D (`?renderer=2d` forces it). Both use one fixed
 | Failed                | Explicit submission rejection or failed execution                                 |
 | Unresolved            | No terminal receipt within the 60-second observation deadline                     |
 | Pending               | Attempted minus successful, failed, and unresolved                                |
-| Confirmed tx/sec      | Successful transfers in the last three completed blocks / their interval          |
+| Confirmed tx/sec      | Successful transfers in the last two completed blocks / their chain interval      |
 | Average confirmed/sec | Successful receipts / active experiment time, including signing and receipt drain |
 | Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window   |
 | Sending               | Attempts per second over five seconds while spraying; the last second after it    |
 
 Receipts arrive in block-sized lumps: under load a block carries 100,000–200,000
 of these transfers every ~3 s, so any short time window swings with block
-timing. The headline therefore measures completed blocks. Before two blocks land
-it shows the average since the spray began; after work ends, a trailing window
-decays to zero.
+timing. The headline therefore measures completed blocks, timed by the chain's own
+block times (`getBlockByHeight`), not by when receipts reached the app. Before two
+blocks land it shows the current spray's average, which starts at zero; after work
+ends, a trailing window decays to zero.
+
+Confirmations trail submissions. At devnet's limit about 393,000 transfers are in
+flight, so a transfer sent now confirms roughly 8–9 seconds later; the HUD shows
+this as "~N s to confirm" (in flight / confirmed rate). The graph beside the
+headline plots the last 60 seconds: the confirmed rate as a filled line and the
+sent rate as a dashed line, so the gap between them is visible. On the canvas,
+each confirmation lights up the place where that transfer was sprayed, oldest
+first, so the trail you drew glows again as its blocks land, including after you
+let go.
 
 Idle gaps between sprays are excluded from average time. A lost submission
 response is checked using the original hash, never replaced with another
@@ -227,12 +238,15 @@ submissions thins the spray instead of cutting it off. On release, prediction
 stops and anything still queued or arriving later is counted without being drawn,
 so the spray ends where the click ends; particles already in flight fade out.
 
-One particle is drawn for every five attempted transactions, so the spray grows
-with throughput; the HUD says so. Above about 50,000 transactions per second, or
-when a frame takes more than 8 ms to draw, fewer particles are drawn per
-transaction so live particles never overflow the 30,000-particle pool. The canvas
-exposes `data-emitted` (transfers represented), `data-drawn`, `data-draw-ms`, and
-`data-density` for diagnostics. Counters are authoritative even if a slow browser
+The scale is fixed per screen, so the spray grows with throughput; the HUD shows
+it. With WebGL a laptop or larger screen (1,000,000 CSS pixels or more) draws one
+particle for every three transfers, with lifetimes 1.3 times longer; a tablet one
+for every four (1.2 times); a phone one for every five (1.15 times). Canvas 2D
+draws one for every five. Confirmations use the same scale. When the pool would
+overflow, or a frame takes more than 8 ms to draw, fewer particles are drawn per
+transfer. The canvas exposes `data-emitted` (transfers represented),
+`data-confirmed`, `data-drawn`, `data-draw-ms`, and `data-density` for
+diagnostics. Counters are authoritative even if a slow browser
 misses a connection or cannot display every particle.
 
 HOG has no gas fee, but wallet replay-cache storage locks and releases HOG deposits.

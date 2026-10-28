@@ -4,7 +4,7 @@ import {
   type ServerMessage,
   type Snapshot,
 } from "../shared/protocol.js";
-import { ParticleCanvas, TRANSFERS_PER_PARTICLE } from "./particles.js";
+import { ParticleCanvas } from "./particles.js";
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -13,8 +13,12 @@ function element<T extends HTMLElement>(id: string): T {
 }
 const canvas = element<HTMLCanvasElement>("canvas");
 const particles = new ParticleCanvas(canvas);
-element("ratio-caption").textContent =
-  `1 DOT = ${TRANSFERS_PER_PARTICLE} TRANSFERS`;
+function showScale(): void {
+  element("ratio-caption").textContent =
+    `1 DOT = ${particles.transfersPerParticle} TRANSFERS`;
+}
+showScale();
+window.addEventListener("resize", showScale);
 const dialog = element<HTMLDialogElement>("controls");
 const app = element("app");
 const batchSize = element<HTMLInputElement>("batch-size");
@@ -31,6 +35,11 @@ let lastSent = 0;
 let noticeTimer: ReturnType<typeof setTimeout>;
 let dirty = false;
 const history: number[] = [];
+/** Successful transfers in the last state, to light up new confirmations. */
+let lastSucceeded: number | undefined;
+/** The HUD graph: confirmed and sent rates for the last 60 seconds. */
+const GRAPH_MS = 60_000;
+const rates: { time: number; confirmed: number; sent: number }[] = [];
 
 function send(message: unknown): void {
   if (socket.readyState === WebSocket.OPEN)
@@ -155,9 +164,62 @@ function ease(now: number): void {
     const node = element(id);
     if (node.textContent !== text) node.textContent = text;
   }
+  drawGraph();
   requestAnimationFrame(ease);
 }
 requestAnimationFrame(ease);
+
+/** Confirmed rate as a filled line, sent rate as a dashed line; it scrolls each frame. */
+function drawGraph(): void {
+  const graph = element<HTMLCanvasElement>("rate-graph");
+  const width = graph.clientWidth;
+  const height = graph.clientHeight;
+  if (!width || !height) return;
+  const ratio = Math.min(devicePixelRatio, 2);
+  if (graph.width !== Math.round(width * ratio)) {
+    graph.width = Math.round(width * ratio);
+    graph.height = Math.round(height * ratio);
+  }
+  const c = graph.getContext("2d");
+  if (!c) return;
+  c.setTransform(ratio, 0, 0, ratio, 0, 0);
+  c.clearRect(0, 0, width, height);
+  const now = Date.now();
+  while (rates.length > 2 && rates[1]!.time < now - GRAPH_MS) rates.shift();
+  const top = Math.max(
+    1_000,
+    ...rates.map((r) => Math.max(r.confirmed, r.sent)),
+  );
+  const x = (time: number) => ((time - (now - GRAPH_MS)) / GRAPH_MS) * width;
+  const y = (value: number) => height - 1 - (value / top) * (height - 4);
+  c.fillStyle = "rgb(255 255 255 / 8%)";
+  c.fillRect(0, height - 1, width, 1);
+  if (rates.length < 2) return;
+  c.beginPath();
+  rates.forEach((r, i) =>
+    i
+      ? c.lineTo(x(r.time), y(r.confirmed))
+      : c.moveTo(x(r.time), y(r.confirmed)),
+  );
+  c.lineTo(x(now), y(rates.at(-1)!.confirmed));
+  c.strokeStyle = "#d4f879";
+  c.lineWidth = 1.5;
+  c.stroke();
+  c.lineTo(x(now), height);
+  c.lineTo(x(rates[0]!.time), height);
+  c.fillStyle = "rgb(212 248 121 / 14%)";
+  c.fill();
+  c.beginPath();
+  rates.forEach((r, i) =>
+    i ? c.lineTo(x(r.time), y(r.sent)) : c.moveTo(x(r.time), y(r.sent)),
+  );
+  c.lineTo(x(now), y(rates.at(-1)!.sent));
+  c.setLineDash([2, 3]);
+  c.strokeStyle = "#8b9280";
+  c.lineWidth = 1;
+  c.stroke();
+  c.setLineDash([]);
+}
 
 let atCapacityUntil = 0;
 function update(snapshot: Snapshot): void {
@@ -166,6 +228,16 @@ function update(snapshot: Snapshot): void {
   particles.held = held || (state.owner !== null && state.owner !== clientId);
   const spraying = state.phase === "spraying";
   particles.confirmedRate = spraying ? state.liveTps : 0;
+  // New confirmations light up where those transfers were sprayed. A drop is a reset.
+  if (lastSucceeded !== undefined && state.succeeded > lastSucceeded)
+    particles.confirm(state.succeeded - lastSucceeded);
+  lastSucceeded = state.succeeded;
+  const working = spraying || state.pending > 0;
+  rates.push({
+    time: Date.now(),
+    confirmed: state.liveTps,
+    sent: working ? state.submitTps : 0,
+  });
   app.classList.toggle("is-spraying", spraying);
   element("connection-dot").className =
     state.phase === "error" ? "error" : "ready";
@@ -205,18 +277,12 @@ function update(snapshot: Snapshot): void {
     spraying ? state.submitTps : state.sendingTps,
   );
   element("in-flight").textContent = format.format(state.pending);
-  const bars = element("block-bars").children;
-  const blocks = state.recentBlocks;
-  const tallest = Math.max(1, ...blocks.map((block) => block.succeeded));
-  for (let i = 0; i < bars.length; i++) {
-    // Oldest on the left, newest on the right; empty slots stay at the floor.
-    const block = blocks[blocks.length - bars.length + i];
-    const bar = bars[i] as HTMLElement;
-    bar.style.height = `${block ? 4 + (20 * block.succeeded) / tallest : 4}px`;
-    bar.title = block
-      ? `Block ${block.height}: ${format.format(block.succeeded)} successful`
+  // Little's law: transfers in flight divided by the confirmed rate is how long a
+  // transfer sent now waits to confirm.
+  element("confirm-delay").textContent =
+    state.pending > 0 && state.liveTps > 500
+      ? ` · ~${Math.max(1, Math.round(state.pending / state.liveTps))} s to confirm`
       : "";
-  }
   element("receipt-delay").textContent =
     `${format.format(state.averageReceiptMs)} ms`;
   element("elapsed").textContent =

@@ -72,20 +72,24 @@
           <p class="eyebrow">CONFIRMED TX / SEC</p>
           <div class="rate-row">
             <p id="live-tps">0</p>
-            <div
-              id="block-bars"
-              class="rate-bars"
-              role="img"
-              aria-label="Successful transfers in the latest five blocks"
-              title="Successful transfers in each of the latest five blocks"
-            >
-              <i></i><i></i><i></i><i></i><i></i>
+            <div class="rate-graph">
+              <canvas
+                id="rate-graph"
+                role="img"
+                aria-label="Confirmed and sent transfers per second over the last 60 seconds"
+              ></canvas>
+              <p class="graph-key" aria-hidden="true">
+                <i class="key-confirmed"></i>Confirmed
+                <i class="key-sent"></i>Sent · 60 s
+              </p>
             </div>
           </div>
-          <p class="metric-note">Last 3 confirmed blocks</p>
+          <p class="metric-note">Last 2 confirmed blocks</p>
           <p class="metric-live">
             Sending <span id="sending-tps">0</span>/s ·
-            <span id="in-flight">0</span> in flight
+            <span id="in-flight">0</span> in flight<span
+              id="confirm-delay"
+            ></span>
           </p>
         </div>
         <div class="hud-right">

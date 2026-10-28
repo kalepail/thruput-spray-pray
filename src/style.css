@@ -366,22 +366,33 @@ kbd {
   letter-spacing: -0.075em;
   line-height: 1;
 }
-.rate-bars {
+.rate-graph {
   display: flex;
-  align-items: flex-end;
-  height: 24px;
-  gap: 4px;
+  flex-direction: column;
+  gap: 6px;
 }
-.rate-bars i {
-  width: 3px;
-  background: #4b533d;
-  height: 4px;
+#rate-graph {
+  display: block;
+  width: 168px;
+  height: 40px;
 }
-.rate-bars i {
-  transition: height 160ms ease-out;
+.graph-key {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.625rem;
+  color: #777e6c;
+  white-space: nowrap;
 }
-.is-spraying .rate-bars i {
-  background: var(--accent);
+.graph-key i {
+  display: inline-block;
+  width: 10px;
+  height: 0;
+  border-top: 1.5px solid var(--accent);
+}
+.graph-key i.key-sent {
+  margin-left: 6px;
+  border-top: 1px dashed #8b9280;
 }
 .metric-live {
   font-size: 0.75rem;
@@ -766,6 +777,13 @@ summary {
   }
   .rate-row {
     gap: 14px;
+  }
+  #rate-graph {
+    width: 84px;
+    height: 32px;
+  }
+  .graph-key {
+    display: none;
   }
   .metric-note {
     font-size: 0.7rem;
