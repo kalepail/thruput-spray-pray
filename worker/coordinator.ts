@@ -85,6 +85,8 @@ export class SprayPray extends DurableObject<Env> {
   /** When this object first saw each height as the chain tip, in ms. */
   private tipSeenAt = new Map<string, number>();
   private lastRate = 0;
+  /** Highest confirmed headline since the last reset; caps the send rate. */
+  private peakRate = 0;
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -461,6 +463,9 @@ export class SprayPray extends DurableObject<Env> {
     let message: string;
     const laneError = lanes.find((s) => s.phase === "error");
     const pending = sum((s) => s.pending);
+    const liveTps = this.blockRate(byHeight, pending);
+    this.peakRate = Math.max(this.peakRate, liveTps);
+    const pendingLimit = sum((s) => s.pendingLimit);
     if (this.setupError || laneError) {
       phase = "error";
       message = this.setupError ?? laneError!.message;
@@ -494,9 +499,15 @@ export class SprayPray extends DurableObject<Env> {
       resubmitted: sum((s) => s.resubmitted),
       assumed: sum((s) => s.assumed ?? 0),
       pending,
-      liveTps: this.blockRate(byHeight, pending),
-      submitTps: sum((s) => s.submitTps),
-      sendingTps: sum((s) => s.sendingTps),
+      liveTps,
+      // No rate may read above what the chain did. Sends lead confirmations by up
+      // to the in-flight cap, and a refill after a block of receipts can put more
+      // than the chain's rate into one 10 s window, so cap at the best confirmed
+      // rate shown; before the first one, the cap itself spread over 10 s.
+      submitTps: Math.min(
+        sum((s) => s.submitTps),
+        this.peakRate || (pendingLimit * 1000) / RATE_WINDOW_MS,
+      ),
       recentBlocks: [...byHeight]
         .sort(([a], [b]) => (BigInt(a) < BigInt(b) ? -1 : 1))
         .slice(-16)
@@ -504,7 +515,7 @@ export class SprayPray extends DurableObject<Env> {
       averageTps: elapsedMs ? (succeeded * 1000) / elapsedMs : 0,
       averageTxPerBlock: this.blocks.size ? succeeded / this.blocks.size : 0,
       observedBlocks: this.blocks.size,
-      pendingLimit: sum((s) => s.pendingLimit),
+      pendingLimit,
       averageReceiptMs: receiptCount ? receiptTimeMs / receiptCount : 0,
       // Each lane's 5 s average, weighted by the transfers it confirmed in that window.
       recentReceiptMs: recentConfirmed
@@ -580,6 +591,7 @@ export class SprayPray extends DurableObject<Env> {
     this.blocks.clear();
     this.seen.clear();
     this.lastRate = 0;
+    this.peakRate = 0;
     this.errors = [];
     this.cursors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.

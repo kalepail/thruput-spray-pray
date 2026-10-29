@@ -34,9 +34,12 @@ export interface Snapshot {
    */
   oldestPendingAt?: number;
   liveTps: number;
+  /**
+   * Transfers handed to submission in the last 10 s / 10 s, never above the best
+   * confirmed rate this experiment has shown (or the in-flight cap / 10 s before
+   * the first one).
+   */
   submitTps: number;
-  /** Transfers handed to submission in the last second. */
-  sendingTps: number;
   /** Successful transfers in the latest 16 blocks this experiment landed in. */
   recentBlocks: { height: string; succeeded: number }[];
   averageTps: number;

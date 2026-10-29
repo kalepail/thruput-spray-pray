@@ -44,8 +44,6 @@ let sprayStart: { time: number; attempted: number } | null = null;
 /** The HUD graph: confirmed and sent rates for the last 60 seconds. */
 const GRAPH_MS = 60_000;
 const rates: { time: number; confirmed: number; sent: number }[] = [];
-/** Attempts seen in the last 10 s, for the send rate shown while spraying. */
-const sends: { time: number; attempted: number }[] = [];
 
 function send(message: unknown): void {
   if (socket.readyState === WebSocket.OPEN)
@@ -240,22 +238,10 @@ function update(snapshot: Snapshot): void {
   const spraying = state.phase === "spraying";
   particles.confirmedRate = spraying ? state.liveTps : 0;
   const working = spraying || state.pending > 0;
-  // Sends over the last 10 s / 10 s. At Futurenet's limit the in-flight cap fills
-  // in ~2 s and then waits for receipts, so a shorter window reports a send rate
-  // (100k/s and more) far above what the chain confirms.
-  const now = Date.now();
-  if (sends.length && state.attempted < sends.at(-1)!.attempted)
-    sends.length = 0;
-  sends.push({ time: now, attempted: state.attempted });
-  while (sends.length > 2 && sends[1]!.time <= now - RATE_WINDOW_MS)
-    sends.shift();
-  const sendRate =
-    ((state.attempted - sends[0]!.attempted) * 1000) / RATE_WINDOW_MS;
-  const sendingNow = spraying ? sendRate : state.sendingTps;
   rates.push({
-    time: now,
+    time: Date.now(),
     confirmed: state.liveTps,
-    sent: working ? sendingNow : 0,
+    sent: working ? state.submitTps : 0,
   });
   app.classList.toggle("is-spraying", spraying);
   element("connection-dot").className =
@@ -327,9 +313,11 @@ function update(snapshot: Snapshot): void {
     if (id in eased) eased[id]!.target = value;
     else element(id).textContent = format.format(value);
   }
-  // Batches go out in block-sized lumps, so the last second swings to 0 between
-  // blocks. Show the 10 s rate while spraying and the last second after it.
-  element("sending-tps").textContent = format.format(sendingNow);
+  // The server's 10 s send rate, capped at what the chain has confirmed. A release
+  // stops new sends at once, so show 0 then rather than the rate decaying.
+  element("sending-tps").textContent = format.format(
+    spraying ? state.submitTps : 0,
+  );
   element("in-flight").textContent = format.format(state.pending);
   // Measured, not estimated: send-to-receipt time of the transfers that confirmed
   // in the last 5 s.

@@ -191,8 +191,8 @@ cap device-pixel ratio at 2; WebGL uses a **160,000-particle** pool, Canvas 2D a
 | Pending               | Attempted minus successful, failed, and unresolved                                 |
 | Confirmed tx/sec      | Successful transfers in complete blocks committed in the last 10 s / at least 10 s |
 | Average confirmed/sec | Successful receipts / active experiment time, including signing and receipt drain  |
-| Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window    |
-| Sending               | Attempts in the last 10 s / 10 s while spraying; the last second after it          |
+| Submitted/sec         | Attempts in the last 10 s / 10 s, capped at the best confirmed tx/sec shown        |
+| Sending               | Submitted/sec while spraying; 0 after release, which stops new sends               |
 
 The headline must never report more than the chain did. Our transfers reach the
 chain in a cycle: the 393,216 in-flight cap fills in about 2 s, those transfers

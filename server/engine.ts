@@ -50,6 +50,8 @@ const BACKOFF_MAX_MS = 8_000;
 
 /** Pending transfers older than this are left out of `oldestPendingAt`. */
 const OLDEST_PENDING_MS = 20_000;
+/** `submitTps` averages sends over this window, like the confirmed headline. */
+const SEND_WINDOW_MS = 10_000;
 
 /** The gateway's `-32050` answer: the backend behind it is down, not the transfer. */
 export function isBackendUnavailable(message: string): boolean {
@@ -280,15 +282,18 @@ export class Engine {
 
   snapshot(): Snapshot {
     const now = Date.now();
-    this.samples = this.samples.filter((sample) => now - sample.time < 5000);
-    // Rates cover the last 5 s, or less when activity began more recently, so the
-    // headline is right from the first receipts instead of ramping for 5 s.
+    this.samples = this.samples.filter(
+      (sample) => now - sample.time < SEND_WINDOW_MS,
+    );
+    const last5s = this.samples.filter((sample) => now - sample.time < 5000);
+    // Receipt rates cover the last 5 s, or less when activity began more recently,
+    // so the receipt delay is right from the first receipts instead of ramping.
     const windowSeconds = Math.min(
       5,
-      Math.max(1, (now - (this.samples[0]?.time ?? now)) / 1000),
+      Math.max(1, (now - (last5s[0]?.time ?? now)) / 1000),
     );
-    const recent = this.samples.reduce((n, s) => n + s.succeeded, 0);
-    const recentMs = this.samples.reduce((n, s) => n + s.receiptMs, 0);
+    const recent = last5s.reduce((n, s) => n + s.succeeded, 0);
+    const recentMs = last5s.reduce((n, s) => n + s.receiptMs, 0);
     const elapsedMs =
       this.elapsed +
       (this.workStart === null ? 0 : performance.now() - this.workStart);
@@ -301,12 +306,11 @@ export class Engine {
       ...this.counts,
       pending: this.pending.size,
       oldestPendingAt: this.oldestPendingAt(now),
-      liveTps:
-        this.samples.reduce((n, s) => n + s.succeeded, 0) / windowSeconds,
-      submitTps: this.samples.reduce((n, s) => n + s.sent, 0) / windowSeconds,
-      sendingTps: this.samples
-        .filter((sample) => now - sample.time < 1000)
-        .reduce((n, s) => n + s.sent, 0),
+      liveTps: recent / windowSeconds,
+      // Always over the full 10 s: the in-flight cap goes out in ~2 s, so a shorter
+      // window reports a send rate far above what the chain confirms.
+      submitTps:
+        (this.samples.reduce((n, s) => n + s.sent, 0) * 1000) / SEND_WINDOW_MS,
       recentBlocks: [...this.blockCounts]
         .sort(([a], [b]) => (BigInt(a) < BigInt(b) ? -1 : 1))
         .slice(-16)
