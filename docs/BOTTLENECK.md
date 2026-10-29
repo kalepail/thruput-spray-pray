@@ -139,21 +139,31 @@ mostly in DFW, so it kept most of them. Arm B probes up to 512 candidates
 the coordinator in SEA (9 ms).
 
 Hosted app, 24 wallets, 48 lanes, batch 256, concurrency 96, 393,216 in flight, 60 s per
-run, order A A B B A B. Sends/s is succeeded / 60 s; every run had 0 failed and 0
-unresolved.
+run, order A A B B A B, then B A on a later check. Every run had 0 failed and 0
+unresolved. Confirmed tx/s is the chain's figure: our transfers / chain time from the
+commit before our first block to our last block (`getBlockByHeight` timepoints). Best
+10 s is the highest rate over any run of our blocks spanning at least 10 s; for A1 to B3
+it covers only the last 16 blocks (from `recentBlocks`). Sends/s is succeeded / 60 s.
+"Other load" means blocks with 200 or more transactions just outside our spray
+(`getTransactionsByBlock`); Futurenet is public, and these runs were not alone.
 
-| Run | Lanes (median RTT)                         | Succeeded | Sends/s | Average tx/s | Receipt avg |
-| --- | ------------------------------------------ | --------- | ------- | ------------ | ----------- |
-| A1  | 33 DFW, 8 SJC, 3 DEN, 2 SEA, 2 LAX (58 ms) | 2,040,832 | 34,014  | 29,297       | 12.0 s      |
-| A2  | same                                       | 2,269,184 | 37,820  | 31,613       | 11.1 s      |
-| B1  | 34 SEA, 14 SJC (10 ms)                     | 2,342,144 | 39,036  | 34,642       | 10.5 s      |
-| B2  | same                                       | 2,591,744 | 43,196  | 35,471       | 9.5 s       |
-| A3  | as A1 (56 ms)                              | 2,192,384 | 36,540  | 30,531       | 11.3 s      |
-| B3  | as B1 (10 ms)                              | 2,295,040 | 38,251  | 34,008       | 10.7 s      |
+| Run | Lanes (median RTT)                         | Succeeded | Confirmed tx/s | Best 10 s | Sends/s | Receipt avg | Other load             |
+| --- | ------------------------------------------ | --------- | -------------- | --------- | ------- | ----------- | ---------------------- |
+| A1  | 33 DFW, 8 SJC, 3 DEN, 2 SEA, 2 LAX (58 ms) | 2,040,832 | 29,761         | 38,687    | 34,014  | 12.0 s      | 6 blocks before        |
+| A2  | same                                       | 2,269,184 | 35,673         | 44,978    | 37,820  | 11.1 s      | none                   |
+| B1  | 34 SEA, 14 SJC (10 ms)                     | 2,342,144 | 38,353         | 56,962    | 39,036  | 10.5 s      | none                   |
+| B2  | same                                       | 2,591,744 | 35,442         | 54,066    | 43,196  | 9.5 s       | none                   |
+| A3  | as A1 (56 ms)                              | 2,192,384 | 34,363         | 48,227    | 36,540  | 11.3 s      | 8+ blocks after        |
+| B3  | as B1 (10 ms)                              | 2,295,040 | 38,093         | 48,647    | 38,251  | 10.7 s      | none                   |
+| B4  | as B1 (10 ms)                              | 1,986,304 | 32,003         | 46,448    | 33,105  | 12.2 s      | 4 blocks, into our run |
+| A4  | as A1 (56 ms)                              | 2,319,104 | 37,797         | 48,920    | 38,652  | 10.3 s      | none                   |
 
-**Conclusion:** placement beside the RPC is better in every run: sends/s 40,161 against
-36,124 (+11%), average tx/s +13%, and receipts 10.2 s against 11.5 s. The ranges do not
-overlap. The hosted app now runs arm B.
+**Conclusion:** on the chain's confirmed tx/s, placement beside the RPC is equal, not
+clearly better. Runs without other load: A 35,673 and 37,797 (mean 36,735), B 38,353,
+35,442, and 38,093 (mean 37,296, +1.5%), within run-to-run noise; receipts 10.7 s and
+10.2 s. Sends/s favoured B by 11% in the first six runs, but sends are not the measure.
+The hosted app keeps arm B: it is not worse, and lanes 10 ms from the RPC leave more room
+if the chain gets faster. The limit stays chain-side, as Test 1 found.
 
 The first deploy of arm B found a second problem. The Placement object outlived the
 deploy, so it kept handing out the old keys: 11 of 16 requests reached the old
