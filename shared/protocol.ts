@@ -36,8 +36,7 @@ export interface Snapshot {
   liveTps: number;
   /**
    * Transfers handed to submission in the last 10 s / 10 s, never above the best
-   * confirmed rate this experiment has shown (or the in-flight cap / 10 s before
-   * the first one).
+   * confirmed rate of the last 30 s (or the in-flight cap / 10 s without one).
    */
   submitTps: number;
   /** Successful transfers in the latest 16 blocks this experiment landed in. */

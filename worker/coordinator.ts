@@ -38,6 +38,8 @@ const TIP_READ_MS = 250;
 // The headline averages over this much commit time, about one fill-and-wait cycle
 // of the in-flight cap at Futurenet's limit.
 const RATE_WINDOW_MS = 10_000;
+/** The send rate is capped at the best confirmed rate shown in this window. */
+const PEAK_WINDOW_MS = 30_000;
 const LANE_CONFIGURE_MS = 120_000;
 function deadline<T>(call: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -85,8 +87,8 @@ export class SprayPray extends DurableObject<Env> {
   /** When this object first saw each height as the chain tip, in ms. */
   private tipSeenAt = new Map<string, number>();
   private lastRate = 0;
-  /** Highest confirmed headline since the last reset; caps the send rate. */
-  private peakRate = 0;
+  /** Recent confirmed headlines; their maximum caps the send rate. */
+  private recentRates: { at: number; rate: number }[] = [];
   private errors: string[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
@@ -464,7 +466,11 @@ export class SprayPray extends DurableObject<Env> {
     const laneError = lanes.find((s) => s.phase === "error");
     const pending = sum((s) => s.pending);
     const liveTps = this.blockRate(byHeight, pending);
-    this.peakRate = Math.max(this.peakRate, liveTps);
+    const now = Date.now();
+    this.recentRates.push({ at: now, rate: liveTps });
+    while (this.recentRates[0]!.at < now - PEAK_WINDOW_MS)
+      this.recentRates.shift();
+    const peakRate = Math.max(...this.recentRates.map((r) => r.rate));
     const pendingLimit = sum((s) => s.pendingLimit);
     if (this.setupError || laneError) {
       phase = "error";
@@ -503,10 +509,11 @@ export class SprayPray extends DurableObject<Env> {
       // No rate may read above what the chain did. Sends lead confirmations by up
       // to the in-flight cap, and a refill after a block of receipts can put more
       // than the chain's rate into one 10 s window, so cap at the best confirmed
-      // rate shown; before the first one, the cap itself spread over 10 s.
+      // rate of the last 30 s; before one, the cap itself spread over 10 s, as the
+      // headline's sending value.
       submitTps: Math.min(
         sum((s) => s.submitTps),
-        this.peakRate || (pendingLimit * 1000) / RATE_WINDOW_MS,
+        peakRate || (pendingLimit * 1000) / RATE_WINDOW_MS,
       ),
       recentBlocks: [...byHeight]
         .sort(([a], [b]) => (BigInt(a) < BigInt(b) ? -1 : 1))
@@ -591,7 +598,7 @@ export class SprayPray extends DurableObject<Env> {
     this.blocks.clear();
     this.seen.clear();
     this.lastRate = 0;
-    this.peakRate = 0;
+    this.recentRates = [];
     this.errors = [];
     this.cursors = [];
     // Report now: an empty report list would read as "connecting" until the next tick.
