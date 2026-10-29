@@ -1,14 +1,18 @@
 import { DurableObject, env } from "cloudflare:workers";
 import type { SprayPray } from "./coordinator.js";
-import type { Host } from "./host.js";
+import { isNewerVersion, type Host } from "./host.js";
 import type { SprayLane } from "./lane.js";
 
 // Bump to choose new objects, for example after the Futurenet RPC moves.
-const LAYOUT_KEY = "lanes-v1";
-const COORDINATOR_KEY = "coordinator-v1";
+const LAYOUT_KEY = "lanes-v2";
+const COORDINATOR_KEY = "coordinator-v2";
 // Lanes this close to the RPC are beside Futurenet (SEA or PDX for AWS us-west-2).
 const NEAR_RPC_MS = 15;
-const MAX_CANDIDATES = 64;
+// A `wnam` hint lands mostly in DFW (~55 ms from the RPC); on 2026-10-29 only 1 of
+// the first 64 candidates was in SEA. 64 candidates for 48 lanes kept most of the
+// DFW ones, so probe up to 512 and keep the fastest.
+const MAX_CANDIDATES = 512;
+const ROUND = 32;
 
 export function coordinatorStub(name: string) {
   const ns = env.SPRAY_PRAY as DurableObjectNamespace<SprayPray>;
@@ -32,7 +36,19 @@ export function laneStub(name: string) {
 export class Placement extends DurableObject<Env> {
   private choosing = new Map<string, Promise<string[]>>();
 
-  lanes(count: number): Promise<string[]> {
+  /**
+   * Callers pass their Worker version. Nothing else restarts this object after a
+   * deploy, so a stale instance would keep handing out the old layout: on
+   * 2026-10-29 a bumped key left 11 of 16 requests on the old coordinator and lanes
+   * while the rest used the new ones, two experiments on the same wallets.
+   */
+  private checkVersion(version: string | undefined) {
+    if (isNewerVersion(version, this.env.VERSION.timestamp))
+      this.ctx.abort("Worker version changed");
+  }
+
+  lanes(count: number, version?: string): Promise<string[]> {
+    this.checkVersion(version);
     return this.pick(LAYOUT_KEY, count, (name) => laneStub(name).probe());
   }
 
@@ -40,7 +56,8 @@ export class Placement extends DurableObject<Env> {
    * The coordinator relays every particle and heartbeat between browsers and lanes,
    * so it belongs beside the lanes too; a distant one added ~200 ms to each click.
    */
-  async coordinator(): Promise<string> {
+  async coordinator(version?: string): Promise<string> {
+    this.checkVersion(version);
     const [name] = await this.pick(COORDINATOR_KEY, 1, (name) =>
       coordinatorStub(name).probe(),
     );
@@ -71,9 +88,9 @@ export class Placement extends DurableObject<Env> {
     probe: (name: string) => Promise<Host>,
   ): Promise<string[]> {
     const found: { name: string; colo: string; rpcRttMs: number }[] = [];
-    for (let next = 0; next < MAX_CANDIDATES; next += 8) {
+    for (let next = 0; next < MAX_CANDIDATES; next += ROUND) {
       const round = await Promise.all(
-        Array.from({ length: 8 }, async (_, i) => {
+        Array.from({ length: ROUND }, async (_, i) => {
           const name = `${key}-${next + i}`;
           const host = await probe(name).catch(() => undefined);
           return host && { name, ...host };

@@ -130,6 +130,37 @@ hosted app keeps `SPRAY_RECEIPT_SAMPLE=1`. A firehose or faster indexer would sh
 receipt lag. It would probably not raise tx/s much: both runs sat at the in-flight cap, but
 524,288 in flight, which covers more receipt lag, measured about 42k tx/s.
 
+## Test 4: lane placement beside the RPC (2026-10-29, Futurenet)
+
+The hosted app had the coordinator and 33 of 48 lanes in DFW, about 57 ms from the RPC
+in AWS us-west-2. Placement probed only 64 fixed candidates, and a `wnam` hint lands
+mostly in DFW, so it kept most of them. Arm B probes up to 512 candidates
+(`lanes-v2`, `coordinator-v2`) and got 34 lanes in SEA and 14 in SJC (median 10 ms), with
+the coordinator in SEA (9 ms).
+
+Hosted app, 24 wallets, 48 lanes, batch 256, concurrency 96, 393,216 in flight, 60 s per
+run, order A A B B A B. Sends/s is succeeded / 60 s; every run had 0 failed and 0
+unresolved.
+
+| Run | Lanes (median RTT)                         | Succeeded | Sends/s | Average tx/s | Receipt avg |
+| --- | ------------------------------------------ | --------- | ------- | ------------ | ----------- |
+| A1  | 33 DFW, 8 SJC, 3 DEN, 2 SEA, 2 LAX (58 ms) | 2,040,832 | 34,014  | 29,297       | 12.0 s      |
+| A2  | same                                       | 2,269,184 | 37,820  | 31,613       | 11.1 s      |
+| B1  | 34 SEA, 14 SJC (10 ms)                     | 2,342,144 | 39,036  | 34,642       | 10.5 s      |
+| B2  | same                                       | 2,591,744 | 43,196  | 35,471       | 9.5 s       |
+| A3  | as A1 (56 ms)                              | 2,192,384 | 36,540  | 30,531       | 11.3 s      |
+| B3  | as B1 (10 ms)                              | 2,295,040 | 38,251  | 34,008       | 10.7 s      |
+
+**Conclusion:** placement beside the RPC is better in every run: sends/s 40,161 against
+36,124 (+11%), average tx/s +13%, and receipts 10.2 s against 11.5 s. The ranges do not
+overlap. The hosted app now runs arm B.
+
+The first deploy of arm B found a second problem. The Placement object outlived the
+deploy, so it kept handing out the old keys: 11 of 16 requests reached the old
+coordinator and lanes, and the rest reached the new ones, two experiments on the same
+wallets. Placement now restarts when a caller runs a newer version, like the lanes and
+the coordinator; after that fix every request reached one coordinator on each switch.
+
 ## Upstream benchmark for comparison
 
 `groundhogchain/metrics_history` stores hogd CI benchmarks. On 2026-10-28 (hogd `7f471b9f6`), `schedgateway_stress_batches` submitted

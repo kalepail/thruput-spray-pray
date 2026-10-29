@@ -22,7 +22,7 @@ let coordinatorName: Promise<string> | undefined;
 async function coordinator() {
   coordinatorName ??= (env.PLACEMENT as DurableObjectNamespace<Placement>)
     .getByName("placement")
-    .coordinator()
+    .coordinator(env.VERSION.timestamp)
     .catch((error: unknown) => {
       coordinatorName = undefined;
       throw error;

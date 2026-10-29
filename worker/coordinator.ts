@@ -119,7 +119,7 @@ export class SprayPray extends DurableObject<Env> {
   private laneStubs(): Promise<Lane[]> {
     return (this.lanes ??= (env.PLACEMENT as DurableObjectNamespace<Placement>)
       .getByName("placement")
-      .lanes(this.laneCount)
+      .lanes(this.laneCount, this.version())
       .then((names) => names.map(laneStub))
       .catch((error: unknown) => {
         this.lanes = undefined;
