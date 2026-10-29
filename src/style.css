@@ -325,6 +325,10 @@ kbd {
 .status[data-phase="error"] {
   color: #fb927e;
 }
+/* A notice answers the latest press; on a phone both would overlap. */
+.status:has(~ .notice:not([hidden])) {
+  opacity: 0;
+}
 .notice {
   position: absolute;
   top: 130px;
@@ -860,6 +864,14 @@ summary {
   }
   .gesture {
     margin-top: 0;
+  }
+}
+@media (max-width: 360px) {
+  .sliders {
+    display: none;
+  }
+  .brand-mark {
+    display: none;
   }
 }
 @media (pointer: coarse) {

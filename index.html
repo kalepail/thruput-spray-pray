@@ -99,7 +99,7 @@
           </div>
           <p class="hud-caption">Hold to send. Let go to breathe.</p>
           <div class="footer-meta">
-            <span>THRUPUT</span><span id="wallet-caption">4 WALLETS</span
+            <span>THRUPUT</span><span id="wallet-caption">WALLETS</span
             ><span id="ratio-caption">1 DOT = 5 TRANSFERS</span>
           </div>
         </div>
@@ -246,13 +246,17 @@
           <summary>What are we measuring?</summary>
           <p>
             Successful ERC20 transfers committed on the connected Thruput
-            network. Live TPS is the last five seconds of successful receipt
-            observations divided by five. Average TPS includes signing,
+            network. Confirmed TX / SEC counts this experiment's successful
+            transfers in complete blocks committed in the last 10 seconds,
+            divided by at least 10 seconds, so it never reports more than the
+            chain did. Before the first block of a spray confirms, the headline
+            shows sends instead and says so. Average TPS includes signing,
             submission, and receipt drain, excluding idle gaps.
           </p>
           <p>
-            Each emitted particle represents one attempted transfer of 0.0000001
-            HOG. Particles show submission, not confirmation. Old particles are
+            Each dot stands for several attempted transfers of 0.0000001 HOG;
+            the ratio is at the bottom right. Dots show submitted transfers,
+            released at the confirmed rate once one is known. Old dots are
             recycled when the canvas reaches its capacity.
           </p>
           <p>

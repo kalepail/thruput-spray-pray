@@ -44,7 +44,6 @@ needed. First-time funding can take a few seconds per wallet; progress appears
 above the canvas. There is no wallet extension, signing prompt, contract build, or
 manual key setup.
 
-Run app commands from `spray-pray`, not the experiments repository root.
 The app serves the API, WebSocket, and frontend from one port.
 
 | Variable          | Default                 | Purpose                                                   |
@@ -93,9 +92,9 @@ node.
 
 Particles radiate in all directions, including when holding still. The pending
 limit and average receipt delay in Control room explain flow control: at most
-32,768 transfers can be signing or awaiting a terminal outcome. When that budget
-fills, generation pauses until receipts free capacity. This is not an execution
-error and does not drop submitted transfers.
+393,216 transfers on Futurenet (32,768 locally) can be signing or awaiting a
+terminal outcome. When that budget fills, generation pauses until receipts free
+capacity. This is not an execution error and does not drop submitted transfers.
 
 All browsers share one experiment and its statistics. Only one can spray at a
 time; the others watch that spray live. There is no queue: a refused browser
@@ -141,7 +140,7 @@ browser ──WebSocket──▶ Worker ──▶ SprayPray (coordinator, 1 obje
 Signing uses Web Crypto Ed25519 behind the SDK's `Signer` interface; its signed
 transactions are byte-identical to the earlier Node signer's. Transaction
 construction, wallet wrapping, serialization, and canonical hashing come from
-`@thruputchain/client@0.24.0` (wire format 14). The browser receives only input/control messages,
+`@thruputchain/client@0.25.0` (wire format 14). The browser receives only input/control messages,
 counters, public addresses, and compact particle batches.
 
 The pipeline signs fresh batches, submits bounded JSON-RPC arrays, and polls
@@ -193,7 +192,7 @@ cap device-pixel ratio at 2; WebGL uses a **160,000-particle** pool, Canvas 2D a
 | Confirmed tx/sec      | Successful transfers in complete blocks committed in the last 10 s / at least 10 s |
 | Average confirmed/sec | Successful receipts / active experiment time, including signing and receipt drain  |
 | Submitted/sec         | Attempts over the last five seconds (or less, just after a start) / that window    |
-| Sending               | Attempts per second over five seconds while spraying; the last second after it     |
+| Sending               | Attempts in the last 10 s / 10 s while spraying; the last second after it          |
 
 The headline must never report more than the chain did. Our transfers reach the
 chain in a cycle: the 393,216 in-flight cap fills in about 2 s, those transfers

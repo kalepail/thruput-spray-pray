@@ -51,7 +51,8 @@ work; the browser handles input, rendering, and live telemetry.
 - Unresolved: no terminal result before the receipt deadline, including ambiguous
   transport outcomes. Never automatically replace an ambiguous transaction.
 - Pending: attempted minus successful, failed, and unresolved.
-- Live TPS: successful receipts observed in the trailing five seconds / five.
+- Live TPS (Confirmed tx/sec): successful transfers in complete blocks committed
+  in the last 10 s / at least 10 s; it never reports more than the chain did.
 - Average TPS: successful receipts / elapsed experiment work time, including
   signing, submission, and receipt drain; idle gaps between sprays are excluded.
 - Submission TPS is separate. Labels describe observed demo throughput, not

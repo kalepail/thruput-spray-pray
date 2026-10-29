@@ -44,6 +44,8 @@ let sprayStart: { time: number; attempted: number } | null = null;
 /** The HUD graph: confirmed and sent rates for the last 60 seconds. */
 const GRAPH_MS = 60_000;
 const rates: { time: number; confirmed: number; sent: number }[] = [];
+/** Attempts seen in the last 10 s, for the send rate shown while spraying. */
+const sends: { time: number; attempted: number }[] = [];
 
 function send(message: unknown): void {
   if (socket.readyState === WebSocket.OPEN)
@@ -154,6 +156,8 @@ const eased: Record<string, { shown: number; target: number }> = {
   "total-confirmed": { shown: 0, target: 0 },
 };
 let easedAt = performance.now();
+/** Shown instead of the headline number while it has no value yet. */
+let headlinePlaceholder = "";
 function ease(now: number): void {
   const step = 1 - Math.exp(-(now - easedAt) / 160);
   easedAt = now;
@@ -164,7 +168,10 @@ function ease(now: number): void {
         : value.shown + (value.target - value.shown) * step;
     // Settle exactly on the target once the remaining gap rounds away.
     value.shown = Math.abs(value.target - next) < 0.5 ? value.target : next;
-    const text = format.format(value.shown);
+    const text =
+      id === "live-tps" && headlinePlaceholder
+        ? headlinePlaceholder
+        : format.format(value.shown);
     const node = element(id);
     if (node.textContent !== text) node.textContent = text;
   }
@@ -233,10 +240,22 @@ function update(snapshot: Snapshot): void {
   const spraying = state.phase === "spraying";
   particles.confirmedRate = spraying ? state.liveTps : 0;
   const working = spraying || state.pending > 0;
+  // Sends over the last 10 s / 10 s. At Futurenet's limit the in-flight cap fills
+  // in ~2 s and then waits for receipts, so a shorter window reports a send rate
+  // (100k/s and more) far above what the chain confirms.
+  const now = Date.now();
+  if (sends.length && state.attempted < sends.at(-1)!.attempted)
+    sends.length = 0;
+  sends.push({ time: now, attempted: state.attempted });
+  while (sends.length > 2 && sends[1]!.time <= now - RATE_WINDOW_MS)
+    sends.shift();
+  const sendRate =
+    ((state.attempted - sends[0]!.attempted) * 1000) / RATE_WINDOW_MS;
+  const sendingNow = spraying ? sendRate : state.sendingTps;
   rates.push({
-    time: Date.now(),
+    time: now,
     confirmed: state.liveTps,
-    sent: working ? state.submitTps : 0,
+    sent: working ? sendingNow : 0,
   });
   app.classList.toggle("is-spraying", spraying);
   element("connection-dot").className =
@@ -248,8 +267,10 @@ function update(snapshot: Snapshot): void {
   // expected state, not a fault. Keep the line for a moment after the cap frees up,
   // so it does not flicker between blocks.
   if (state.backpressure && spraying) atCapacityUntil = Date.now() + 3_000;
-  const message =
-    spraying && Date.now() < atCapacityUntil
+  const watching = spraying && state.owner !== null && state.owner !== clientId;
+  const message = watching
+    ? "Another browser is spraying. You can spray when it ends."
+    : spraying && Date.now() < atCapacityUntil
       ? "Futurenet is at capacity. New transfers go out as blocks confirm; none are dropped."
       : state.message;
   if (status.textContent !== message) status.textContent = message;
@@ -258,24 +279,34 @@ function update(snapshot: Snapshot): void {
   // instead of a zero that looks broken. Like the confirmed rate, it divides by at
   // least 10 s: the in-flight cap lets ~400k go out in the first 2 s, and then sends
   // wait for receipts, so a shorter time would report a rate the spray cannot keep.
-  if (!spraying) {
+  // After a release the spray's transfers keep confirming for several seconds.
+  // Until the first of them is counted, show a dash rather than a 0 that reads as
+  // "nothing confirmed".
+  if (spraying) sprayStart ??= { time: Date.now(), attempted: state.attempted };
+  if (working && state.liveTps > 0) confirmedThisSpray = true;
+  if (!working) {
     confirmedThisSpray = false;
     sprayStart = null;
-  } else {
-    sprayStart ??= { time: Date.now(), attempted: state.attempted };
-    if (state.liveTps > 0) confirmedThisSpray = true;
   }
   const sendingFirst = spraying && !confirmedThisSpray;
+  const awaitingFirst = !spraying && working && !confirmedThisSpray;
   const sentRate = sprayStart
     ? ((state.attempted - sprayStart.attempted) * 1000) /
       Math.max(Date.now() - sprayStart.time, RATE_WINDOW_MS)
     : 0;
   const label = sendingFirst ? "SENDING TX / SEC" : "CONFIRMED TX / SEC";
-  const note = sendingFirst
-    ? "Waiting for the first block to confirm"
-    : "Confirmed in the last 10 s";
-  if (element("rate-label").textContent !== label)
+  const note =
+    sendingFirst || awaitingFirst
+      ? "Waiting for the first block to confirm"
+      : "Confirmed in the last 10 s";
+  headlinePlaceholder = awaitingFirst ? "—" : "";
+  if (element("rate-label").textContent !== label) {
     element("rate-label").textContent = label;
+    // Sends and confirmations are different numbers; never glide from one to the
+    // other, or a confirmed label shows the send rate on its way down.
+    const headline = eased["live-tps"]!;
+    headline.shown = sendingFirst ? sentRate : state.liveTps;
+  }
   if (element("rate-note").textContent !== note)
     element("rate-note").textContent = note;
   const metrics: Record<string, number> = {
@@ -297,10 +328,8 @@ function update(snapshot: Snapshot): void {
     else element(id).textContent = format.format(value);
   }
   // Batches go out in block-sized lumps, so the last second swings to 0 between
-  // blocks. Show the five-second rate while spraying and the last second after it.
-  element("sending-tps").textContent = format.format(
-    spraying ? state.submitTps : state.sendingTps,
-  );
+  // blocks. Show the 10 s rate while spraying and the last second after it.
+  element("sending-tps").textContent = format.format(sendingNow);
   element("in-flight").textContent = format.format(state.pending);
   // Measured, not estimated: send-to-receipt time of the transfers that confirmed
   // in the last 5 s.
